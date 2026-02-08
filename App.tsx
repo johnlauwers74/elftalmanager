@@ -41,7 +41,8 @@ const App: React.FC = () => {
     if (activateEmail) {
       setActivationEmail(activateEmail);
       setView('SET_PASSWORD');
-      window.history.replaceState({}, document.title, window.location.pathname);
+      const newUrl = window.location.origin + window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
     }
   };
 
@@ -91,20 +92,17 @@ const App: React.FC = () => {
   const handleLoginAttempt = async (email: string, pass: string) => {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
-
       if (error) {
         const { data: profile } = await supabase.from('profiles').select('*').eq('email', email).maybeSingle();
         if (profile && (profile.status === 'APPROVED' || profile.status === 'PENDING' || !profile.password)) {
-          alert('Je account moet nog geactiveerd worden. Gebruik de activatielink.');
+          alert('Je account is nog niet volledig geactiveerd. Gebruik de link in je mail of de activatieknop.');
           return;
         }
-        alert('Inloggen mislukt. Controleer je e-mail en wachtwoord.');
+        alert('Foutieve inloggegevens.');
         return;
       }
       if (data.user) await checkSession();
-    } catch (err) {
-      alert('Verbindingsfout.');
-    }
+    } catch (err) { alert('Verbindingsfout.'); }
   };
 
   const handleDemoLogin = (role: Role) => {
@@ -130,71 +128,59 @@ const App: React.FC = () => {
     try {
       const { error } = await supabase.from('profiles').insert([{ email, name, role: 'COACH', status: 'PENDING' }]);
       if (error) throw error;
-      alert('Aanvraag verzonden!');
+      alert('Aanvraag verzonden! Een admin zal je account bekijken.');
       await fetchData();
-    } catch (err: any) {
-      alert('Er is iets misgegaan.');
-    }
+    } catch (err: any) { alert('Aanvraag mislukt.'); }
   };
 
   const handleApproveUser = async (id: string) => {
     try {
+      // We zetten de status op APPROVED. In een echte productie omgeving zou je hier een 
+      // Edge Function aanroepen die de Supabase Auth invite verstuurt.
       const { error } = await supabase.from('profiles').update({ status: 'APPROVED' }).eq('id', id);
       if (error) throw error;
+      alert('Gebruiker goedgekeurd. De coach kan nu zijn wachtwoord instellen via de activatie-URL.');
       await fetchData();
-    } catch (err: any) {
-      alert('Fout: ' + err.message);
-    }
-  };
-
-  const handleUpdateRole = async (id: string, newRole: Role) => {
-    try {
-      const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', id);
-      if (error) throw error;
-      await fetchData();
-    } catch (err: any) {
-      alert('Fout: ' + err.message);
-    }
-  };
-
-  const handleToggleStatus = async (id: string, currentStatus: UserStatus) => {
-    const newStatus: UserStatus = currentStatus === 'INACTIVE' ? 'ACTIVE' : 'INACTIVE';
-    try {
-      const { error } = await supabase.from('profiles').update({ status: newStatus }).eq('id', id);
-      if (error) throw error;
-      await fetchData();
-    } catch (err: any) {
-      alert('Fout: ' + err.message);
-    }
+    } catch (err: any) { alert('Fout: ' + err.message); }
   };
 
   const handleSetPassword = async (pass: string) => {
     if (!activationEmail) return;
     try {
+      // Supabase Auth signUp verstuurt automatisch een email ter bevestiging 
+      // mits ingeschakeld in het dashboard.
       const { data, error } = await supabase.auth.signUp({ email: activationEmail, password: pass });
       if (error) {
         if (error.message.includes("already registered")) {
-          // Als de gebruiker al bestaat in Auth, proberen we een reset (voor demo doen we nu melding)
-          alert("Dit account heeft al een wachtwoord. Gebruik 'Wachtwoord Vergeten' of neem contact op.");
+          alert("Dit e-mailadres is al geactiveerd.");
           return;
         }
         throw error;
       }
       if (data.user) {
         await supabase.from('profiles').update({ id: data.user.id, status: 'ACTIVE', password: 'AUTH_MANAGED' }).eq('email', activationEmail);
-        alert('Succes! Je kunt nu inloggen met je nieuwe wachtwoord.');
+        alert('Account succesvol aangemaakt! Check je mail voor de allerlaatste bevestiging.');
         setView('LANDING');
       }
-    } catch (err: any) {
-      alert('Fout: ' + err.message);
-      throw err;
-    }
+    } catch (err: any) { alert('Fout: ' + err.message); throw err; }
   };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setCurrentUser(null);
     setView('LANDING');
+  };
+
+  // Fixed: Added missing handleToggleStatus function to resolve the error on line 222
+  const handleToggleStatus = async (id: string, currentStatus: UserStatus) => {
+    try {
+      const newStatus: UserStatus = currentStatus === 'INACTIVE' ? 'ACTIVE' : 'INACTIVE';
+      const { error } = await supabase.from('profiles').update({ status: newStatus }).eq('id', id);
+      if (error) throw error;
+      await fetchData();
+    } catch (err: any) {
+      alert('Fout bij wijzigen status: ' + err.message);
+    }
   };
 
   const handleSaveExercise = async (ex: Exercise) => {
@@ -245,7 +231,7 @@ const App: React.FC = () => {
       case 'CREATE_ARTICLE': return <ArticleForm onSave={handleSaveArticle} onCancel={() => setView('BLOG')} />;
       case 'EDIT_ARTICLE': return <ArticleForm onSave={handleSaveArticle} onCancel={() => setView('BLOG')} initialData={editingArticle || undefined} />;
       case 'PODCASTS': return <PodcastView podcasts={podcasts} isAdmin={currentUser.role === 'ADMIN'} onAddPodcast={() => {}} />;
-      case 'ADMIN_USERS': return <AdminUserView users={allUsers} onApprove={handleApproveUser} onUpdateRole={handleUpdateRole} onToggleStatus={handleToggleStatus} currentAdminId={currentUser.id} />;
+      case 'ADMIN_USERS': return <AdminUserView users={allUsers} onApprove={handleApproveUser} onUpdateRole={(id, r) => supabase.from('profiles').update({ role: r }).eq('id', id).then(fetchData)} onToggleStatus={handleToggleStatus} currentAdminId={currentUser.id} />;
       default: return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} />;
     }
   };
