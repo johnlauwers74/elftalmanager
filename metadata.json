@@ -1,0 +1,8 @@
+{
+  "name": "ELFTALMANAGER",
+  "description": "De ultieme tool voor voetbalcoaches om oefeningen te beheren, artikelen te delen en podcasts te hosten.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
