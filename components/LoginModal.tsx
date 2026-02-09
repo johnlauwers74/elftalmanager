@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Mail, Lock, Play, Loader2, ArrowRight, ShieldCheck, User as UserIcon } from 'lucide-react';
 import { Role } from '../types';
 
@@ -20,18 +20,24 @@ const LoginModal: React.FC<LoginModalProps> = ({ onClose, onLogin, onActivate, o
     if (loading) return;
     
     setLoading(true);
-    console.log("Login formulier verzonden...");
+    
+    // Veiligheidstimer: Stop spinner na 5 seconden, wat er ook gebeurt
+    const timer = setTimeout(() => {
+      if (loading) {
+        console.warn("Login timer verlopen, spinner handmatig gestopt.");
+        setLoading(false);
+      }
+    }, 5000);
     
     try {
-      // We wachten op de login poging. 
-      // Als de App.tsx onAuthStateChange sneller is, zal de modal sluiten via props.
       await onLogin(email, pass);
     } catch (error) {
       console.error("Modal login error:", error);
     } finally {
-      // We zetten loading pas na een korte vertraging uit om flikkering te voorkomen
-      // en om zeker te zijn dat async processen de tijd hebben gehad.
-      setTimeout(() => setLoading(false), 1000);
+      // De App.tsx zal de modal sluiten als het lukt, 
+      // anders stoppen we hier de spinner.
+      clearTimeout(timer);
+      setTimeout(() => setLoading(false), 800);
     }
   };
 
@@ -42,7 +48,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ onClose, onLogin, onActivate, o
           <button 
             onClick={onClose} 
             disabled={loading}
-            className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
+            className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors disabled:opacity-30"
           >
             <X size={24} />
           </button>
@@ -113,7 +119,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ onClose, onLogin, onActivate, o
             <button 
               type="submit" 
               disabled={loading}
-              className="w-full bg-brand-green hover:bg-emerald-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2"
+              className="w-full bg-brand-green hover:bg-emerald-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 disabled:grayscale disabled:opacity-70"
             >
               {loading ? <Loader2 className="animate-spin" size={20} /> : 'Inloggen'}
             </button>
