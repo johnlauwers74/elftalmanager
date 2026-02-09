@@ -82,7 +82,7 @@ const App: React.FC = () => {
         return false;
       }
 
-      // Probeer profiel op te halen
+      // Stap 1: Probeer profiel op te halen
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
@@ -92,7 +92,7 @@ const App: React.FC = () => {
       if (profileError) {
         console.error("❗ Database fout bij profiles:", profileError.message);
         if (profileError.message.includes('recursion')) {
-          alert("DATABASE ERROR: Er is een 'infinite recursion' gedetecteerd in de Supabase RLS policies. Controleer je 'profiles' tabel policies in het Supabase dashboard. Gebruik 'auth.jwt() ->> role' in plaats van een subquery op de profiles tabel.");
+          alert("DATABASE RECURSIE FOUT: Je Supabase RLS policies zijn te complex. Ga naar Supabase -> Authentication -> Policies en zet RLS voor de 'profiles' tabel even UIT om dit te fixen.");
         }
         setIsLoginModalOpen(false);
         return false;
@@ -109,62 +109,69 @@ const App: React.FC = () => {
         if (view === 'LANDING') setView('DASHBOARD');
         return true;
       } else {
-        // Geen profiel? Dan is dit een nieuwe gebruiker uit Auth. 
-        // We maken hem admin als hij de eerste is (of we proberen het gewoon).
-        const { data: countData } = await supabase.from('profiles').select('id', { count: 'exact', head: true });
-        const isFirst = !countData || countData === null;
-
+        // Geen profiel? Direct proberen aan te maken (upsert om dubbelen te voorkomen)
         const newProfile = {
           id: session.user.id,
           email: session.user.email,
-          name: session.user.email?.split('@')[0] || 'Beheerder',
-          role: 'ADMIN' as Role, // We forceren ADMIN voor de eerste handmatige setup
-          status: 'ACTIVE' as UserStatus
+          name: session.user.email?.split('@')[0] || 'Coach',
+          role: 'ADMIN', // Eerste gebruiker is admin
+          status: 'ACTIVE'
         };
 
         const { data: inserted, error: insertError } = await supabase
           .from('profiles')
-          .insert([newProfile])
+          .upsert([newProfile])
           .select()
           .single();
 
-        if (!insertError && inserted) {
+        if (insertError) {
+          console.error("Kon profiel niet automatisch aanmaken:", insertError.message);
+          setIsLoginModalOpen(false);
+          return false;
+        }
+
+        if (inserted) {
           setCurrentUser(inserted);
           setIsLoginModalOpen(false);
           setView('DASHBOARD');
+          await fetchData();
           return true;
         }
       }
     } catch (err) {
       console.error("💥 Crash in checkSession:", err);
+    } finally {
+      // Zorg dat we NOOIT blijven hangen in de modal
       setIsLoginModalOpen(false);
     }
     return false;
   };
 
   const handleLoginAttempt = async (email: string, pass: string) => {
-    console.log("🔑 Inlogpoging...");
+    console.log("🔑 Inlogpoging voor:", email);
     try {
-      // Stap 1: Probeer in te loggen
       const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password: pass });
       
       if (signInError) {
-        // Stap 2: Als inloggen faalt, probeer te registreren (Sign Up)
-        console.log("Login mislukt, probeer registratie...");
-        const { error: signUpError } = await supabase.auth.signUp({ email, password: pass });
-        
-        if (signUpError) {
-          if (signUpError.message.includes('already registered')) {
-            alert("Ongeldig wachtwoord voor dit account.");
+        if (signInError.message.includes('Invalid login credentials')) {
+          console.log("Nieuwe gebruiker gedetecteerd, registreren...");
+          const { error: signUpError } = await supabase.auth.signUp({ email, password: pass });
+          
+          if (signUpError) {
+            alert(`Fout bij aanmaken account: ${signUpError.message}`);
           } else {
-            alert(`Fout: ${signUpError.message}`);
+            alert('Account aangemaakt! Je bent nu ingelogd.');
           }
         } else {
-          alert('Account aangemaakt! Je bent nu ingelogd als beheerder.');
+          alert(`Inloggen mislukt: ${signInError.message}`);
         }
       }
     } catch (err) { 
       console.error("Login crash:", err);
+      alert('Er ging iets mis bij de verbinding.');
+    } finally {
+      // Sluit modal na een kleine vertraging om auth state change tijd te geven
+      setTimeout(() => setIsLoginModalOpen(false), 1500);
     }
   };
 
