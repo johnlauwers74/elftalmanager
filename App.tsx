@@ -89,7 +89,7 @@ const App: React.FC = () => {
         return false;
       }
 
-      console.log("📡 Profiel zoeken voor:", session.user.email);
+      console.log("📡 Profiel zoeken in DB voor UID:", session.user.id);
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
@@ -97,13 +97,13 @@ const App: React.FC = () => {
         .maybeSingle();
       
       if (profileError) {
-        console.error("❗ Database fout:", profileError.message);
+        console.error("❗ Database fout bij profiles:", profileError.message);
         setIsLoginModalOpen(false);
         return false;
       }
 
       if (profile) {
-        console.log("✅ Profiel gevonden:", profile.role);
+        console.log("✅ Profiel gevonden. Rol:", profile.role);
         if (profile.status === 'INACTIVE') {
           await handleLogout();
           alert('Dit account is gedeactiveerd.');
@@ -114,21 +114,21 @@ const App: React.FC = () => {
         if (view === 'LANDING') setView('DASHBOARD');
         return true;
       } else {
-        // GEEN PROFIEL GEVONDEN -> AUTO REPAIR
-        console.log("⚠️ Gebruiker ingelogd maar geen profielrij. Profiel aanmaken...");
+        console.log("⚠️ Gebruiker is aangemeld in Auth, maar heeft geen profiel-rij. Aanmaken...");
         
-        // Check of dit de allereerste gebruiker is
-        const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
-        const isFirstUser = count === 0;
+        // Bepaal of dit de allereerste gebruiker is
+        const { data: allProfiles } = await supabase.from('profiles').select('id').limit(1);
+        const isFirstUser = !allProfiles || allProfiles.length === 0;
 
         const newProfile = {
           id: session.user.id,
           email: session.user.email,
-          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Nieuwe Gebruiker',
+          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Beheerder',
           role: isFirstUser ? 'ADMIN' : 'COACH',
           status: isFirstUser ? 'ACTIVE' : 'PENDING'
         };
 
+        console.log("Inserting profile...", newProfile);
         const { data: insertedProfile, error: insertError } = await supabase
           .from('profiles')
           .insert([newProfile])
@@ -136,12 +136,13 @@ const App: React.FC = () => {
           .single();
 
         if (insertError) {
-          console.error("❌ Fout bij aanmaken profiel:", insertError.message);
+          console.error("❌ Kon profiel niet aanmaken:", insertError.message);
+          // Als insert faalt (bijv door RLS), loggen we de user toch in als demo/gast of tonen fout
           setIsLoginModalOpen(false);
           return false;
         }
 
-        console.log("🎉 Profiel succesvol aangemaakt als:", newProfile.role);
+        console.log("🎉 Profiel succesvol aangemaakt!");
         setCurrentUser(insertedProfile);
         setIsLoginModalOpen(false);
         setView('DASHBOARD');
@@ -149,23 +150,42 @@ const App: React.FC = () => {
         return true;
       }
     } catch (err) {
-      console.error("💥 Onverwachte fout in checkSession:", err);
+      console.error("💥 Crash in checkSession:", err);
       setIsLoginModalOpen(false);
       return false;
     }
   };
 
   const handleLoginAttempt = async (email: string, pass: string) => {
-    console.log("🔑 Inlogpoging...");
+    console.log("🔑 Inlogpoging voor:", email);
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
+      
       if (error) {
+        // Als inloggen faalt omdat de gebruiker niet bestaat, check of de DB leeg is voor auto-registratie
+        if (error.message.includes('Invalid login credentials')) {
+          console.log("Onbekende gebruiker. Controleren of database leeg is...");
+          const { data: profiles } = await supabase.from('profiles').select('id').limit(1);
+          
+          if (!profiles || profiles.length === 0) {
+            console.log("Lege database gedetecteerd. Account automatisch aanmaken...");
+            const { error: signUpError } = await supabase.auth.signUp({ email, password: pass });
+            
+            if (signUpError) {
+              alert(`Registratie fout: ${signUpError.message}`);
+            } else {
+              alert('Welkom! Omdat je de eerste gebruiker bent, is je account aangemaakt en ben je nu ADMIN.');
+            }
+            return;
+          }
+        }
+        
         console.error("❌ Login fout:", error.message);
-        alert(`Fout: ${error.message}`);
+        alert(`Inloggen mislukt: ${error.message}`);
       }
-      // checkSession wordt automatisch getriggerd door onAuthStateChange
     } catch (err) { 
       console.error("Login crash:", err);
+      alert('Er ging iets mis bij de verbinding.');
     }
   };
 
