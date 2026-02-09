@@ -32,22 +32,43 @@ const App: React.FC = () => {
   useEffect(() => {
     console.log("🚀 Elftalmanager opstarten...");
     
+    // Initialisatie
     const init = async () => {
-      await fetchData();
-      await checkSession();
+      const hasSession = await checkSession();
+      if (hasSession) {
+        await fetchData();
+      }
       handleUrlParameters();
     };
     init();
 
+    // Luisteren naar auth veranderingen
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log("🔔 Auth Event:", event);
-      if (session) {
-        // Sluit direct de modal bij een succesvol event
+      
+      if (event === 'SIGNED_IN' && session) {
+        console.log("✅ Gebruiker ingelogd, switch naar Dashboard...");
         setIsLoginModalOpen(false);
+        
+        // Zet direct een tijdelijke user zodat de UI niet blokkeert
+        if (!currentUser) {
+          const tempUser: User = {
+            id: session.user.id,
+            email: session.user.email || '',
+            name: session.user.email?.split('@')[0] || 'Coach',
+            role: 'ADMIN',
+            status: 'ACTIVE'
+          };
+          setCurrentUser(tempUser);
+        }
+        
+        setView('DASHBOARD');
         await checkSession();
-      } else {
+        await fetchData();
+      } else if (event === 'SIGNED_OUT') {
+        console.log("👋 Gebruiker uitgelogd");
         setCurrentUser(null);
-        if (view !== 'SET_PASSWORD') setView('LANDING');
+        setView('LANDING');
       }
     });
 
@@ -66,14 +87,19 @@ const App: React.FC = () => {
   };
 
   const fetchData = async () => {
+    console.log("📥 Data ophalen...");
     try {
       const { data: exData } = await supabase.from('exercises').select('*');
       if (exData) setExercises(exData);
+      
       const { data: artData } = await supabase.from('articles').select('*');
       if (artData) setArticles(artData);
+      
       const { data: usersData } = await supabase.from('profiles').select('*');
       if (usersData) setAllUsers(usersData);
-    } catch (err) { console.error("Data fetch fout (mogelijk RLS):", err); }
+    } catch (err) { 
+      console.warn("⚠️ Kon sommige data niet ophalen (waarschijnlijk RLS restricties):", err); 
+    }
   };
 
   const checkSession = async () => {
@@ -84,31 +110,17 @@ const App: React.FC = () => {
         return false;
       }
 
-      console.log("👤 Sessie gevonden voor:", session.user.email);
+      console.log("👤 Actieve sessie gevonden voor:", session.user.email);
 
-      // Stap 1: Probeer profiel op te halen met een korte timeout
-      const profilePromise = supabase
+      // Stap 1: Haal profiel op, maar wees voorbereid op de RLS recursie-fout
+      const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', session.user.id)
         .maybeSingle();
 
-      // We wachten maximaal 3 seconden op de database
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
-      
-      let profile = null;
-      try {
-        const result: any = await Promise.race([profilePromise, timeoutPromise]);
-        if (result.error) {
-          console.error("❌ Profiel error:", result.error.message);
-          if (result.error.message.includes('recursion')) {
-            console.error("⚠️ RECURSIE GEDETECTEERD IN SUPABASE RLS. Gebruik fallback.");
-          }
-        } else {
-          profile = result.data;
-        }
-      } catch (e) {
-        console.warn("⚠️ Database reageert niet of geeft timeout. Gebruik fallback.");
+      if (profileError) {
+        console.error("❌ Database fout (profiel):", profileError.message);
       }
 
       if (profile) {
@@ -118,58 +130,51 @@ const App: React.FC = () => {
           return false;
         }
         setCurrentUser(profile);
-        if (view === 'LANDING') setView('DASHBOARD');
         return true;
       } else {
-        // FALLBACK: Als de database faalt (bijv. door de recursie-fout), 
-        // maken we een tijdelijk profiel-object op basis van de Auth data.
-        // Zo kan de coach tenminste de app in.
+        // Fallback: Gebruik de auth data als de profiles tabel niet reageert/leeg is
         const fallbackUser: User = {
           id: session.user.id,
           email: session.user.email || '',
           name: session.user.email?.split('@')[0] || 'Coach',
-          role: 'ADMIN', // We gaan er even vanuit dat de eerste inlogger de beheerder is
+          role: 'ADMIN',
           status: 'ACTIVE'
         };
-
-        console.log("🛠️ Gebruik van fallback profiel data...");
+        
         setCurrentUser(fallbackUser);
-        if (view === 'LANDING') setView('DASHBOARD');
-
-        // Probeer het profiel alsnog stilletjes aan te maken/updaten op de achtergrond
+        
+        // Probeer stilletjes het profiel aan te maken voor de volgende keer
         supabase.from('profiles').upsert([fallbackUser]).then(({error}) => {
-          if (error) console.warn("Achtergrond profiel sync mislukt:", error.message);
+          if (error) console.warn("Sync profiel mislukt:", error.message);
         });
-
+        
         return true;
       }
     } catch (err) {
-      console.error("💥 Crash in checkSession:", err);
+      console.error("💥 Fout in checkSession:", err);
+      return false;
     } finally {
       setIsLoginModalOpen(false);
     }
-    return false;
   };
 
   const handleLoginAttempt = async (email: string, pass: string) => {
-    console.log("🔑 Inlogpoging...");
+    console.log("🔑 Inlogpoging gestart...");
     try {
       const { error: signInError } = await supabase.auth.signInWithPassword({ email, password: pass });
       
       if (signInError) {
+        console.log("Inloggen mislukt, check of het een nieuwe gebruiker is...");
         if (signInError.message.includes('Invalid login credentials')) {
-          console.log("Nieuw account? Registreren...");
           const { error: signUpError } = await supabase.auth.signUp({ email, password: pass });
-          if (signUpError) alert(`Fout: ${signUpError.message}`);
+          if (signUpError) alert(`Fout bij registratie: ${signUpError.message}`);
+          else alert('Account aangemaakt! Je bent nu ingelogd.');
         } else {
-          alert(`Login fout: ${signInError.message}`);
+          alert(`Inlogfout: ${signInError.message}`);
         }
       }
     } catch (err) { 
       console.error("Login crash:", err);
-    } finally {
-      // De modal moet hoe dan ook dicht na een poging, checkSession doet de rest
-      setTimeout(() => setIsLoginModalOpen(false), 1000);
     }
   };
 
@@ -203,14 +208,20 @@ const App: React.FC = () => {
   };
 
   const renderView = () => {
+    // Cruciaal: als we een user hebben en niet op SET_PASSWORD zitten, toon dan Dashboard-omgeving
     if (view === 'SET_PASSWORD') return <SetPasswordView onSave={handleSetPassword} email={activationEmail} onCancel={() => setView('LANDING')} />;
-    if (!currentUser || view === 'LANDING') return <LandingPage onLogin={() => setIsLoginModalOpen(true)} onSubscribe={(email, name) => {
-      supabase.from('profiles').insert([{ email, name, role: 'COACH', status: 'PENDING' }]).then(() => {
-        alert('Aanvraag verzonden!');
-        fetchData();
-      });
-    }} />;
+    
+    // Als er geen user is OF we zitten expliciet op Landing, toon Landing
+    if (!currentUser || view === 'LANDING') {
+      return <LandingPage onLogin={() => setIsLoginModalOpen(true)} onSubscribe={(email, name) => {
+        supabase.from('profiles').insert([{ email, name, role: 'COACH', status: 'PENDING' }]).then(() => {
+          alert('Aanvraag verzonden!');
+          fetchData();
+        });
+      }} />;
+    }
 
+    // In alle andere gevallen dat we ingelogd zijn:
     switch (view) {
       case 'DASHBOARD': return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} />;
       case 'EXERCISES': return <ExerciseList exercises={exercises} onAdd={() => setView('CREATE_EXERCISE')} onEdit={(ex) => { setEditingExercise(ex); setView('EDIT_EXERCISE'); }} isAdmin={currentUser.role === 'ADMIN'} />;
@@ -227,6 +238,7 @@ const App: React.FC = () => {
       }} onCancel={() => setView('EXERCISES')} initialData={editingExercise || undefined} />;
       case 'BLOG': return <BlogView articles={articles} isAdmin={currentUser.role === 'ADMIN'} onAddArticle={() => setView('CREATE_ARTICLE')} onEditArticle={(art) => { setEditingArticle(art); setView('EDIT_ARTICLE'); }} onViewArticle={(art) => { setSelectedArticle(art); setView('VIEW_ARTICLE'); }} />;
       case 'VIEW_ARTICLE': return selectedArticle ? <ArticleDetail article={selectedArticle} onBack={() => setView('BLOG')} /> : null;
+      case 'PODCASTS': return <PodcastView podcasts={podcasts} isAdmin={currentUser.role === 'ADMIN'} onAddPodcast={() => {}} />;
       case 'ADMIN_USERS': return <AdminUserView users={allUsers} onApprove={async (id) => {
         const user = allUsers.find(u => u.id === id || u.email === id);
         await supabase.from('profiles').update({ status: 'APPROVED' }).eq('email', user?.email);
