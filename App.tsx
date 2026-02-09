@@ -30,9 +30,13 @@ const App: React.FC = () => {
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
 
   useEffect(() => {
-    fetchData();
-    checkSession();
-    handleUrlParameters();
+    const init = async () => {
+      await fetchData();
+      await checkSession();
+      await ensureAdminExists();
+      handleUrlParameters();
+    };
+    init();
   }, []);
 
   const handleUrlParameters = () => {
@@ -43,6 +47,53 @@ const App: React.FC = () => {
       setView('SET_PASSWORD');
       const newUrl = window.location.origin + window.location.pathname;
       window.history.replaceState({}, document.title, newUrl);
+    }
+  };
+
+  const ensureAdminExists = async () => {
+    try {
+      // Check of er al een admin is in de profiles tabel
+      const { data: admins, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('role', 'ADMIN')
+        .limit(1);
+
+      if (!admins || admins.length === 0) {
+        console.log("Geen admin gevonden, bezig met initialisatie...");
+        const adminEmail = (process.env as any).ADMIN_EMAIL;
+        const adminPass = (process.env as any).ADMIN_PASSWORD;
+
+        if (adminEmail && adminPass) {
+          // Maak de admin aan in Auth
+          const { data: authData, error: authError } = await supabase.auth.signUp({
+            email: adminEmail,
+            password: adminPass,
+          });
+
+          if (authError && !authError.message.includes("already registered")) {
+            console.error("Admin Auth Error:", authError.message);
+            return;
+          }
+
+          // Maak of update het profiel
+          const adminUserId = authData.user?.id;
+          const { error: profileError } = await supabase.from('profiles').upsert({
+            email: adminEmail,
+            name: 'Hoofd Administrator',
+            role: 'ADMIN',
+            status: 'ACTIVE',
+            id: adminUserId || undefined
+          }, { onConflict: 'email' });
+
+          if (profileError) console.error("Admin Profile Error:", profileError.message);
+          else console.log("Admin succesvol geïnitialiseerd.");
+          
+          await fetchData();
+        }
+      }
+    } catch (err) {
+      console.error("Fout bij checken admin status:", err);
     }
   };
 
@@ -71,13 +122,13 @@ const App: React.FC = () => {
         const { data: profile } = await supabase
           .from('profiles')
           .select('*')
-          .or(`id.eq.${session.user.id},email.eq.${session.user.email}`)
+          .eq('email', session.user.email)
           .maybeSingle();
         
         if (profile) {
           if (profile.status === 'INACTIVE') {
             await handleLogout();
-            alert('Dit account is gedeactiveerd.');
+            alert('Dit account is momenteel gedeactiveerd.');
             return;
           }
           setCurrentUser(profile);
@@ -94,11 +145,15 @@ const App: React.FC = () => {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
       if (error) {
         const { data: profile } = await supabase.from('profiles').select('*').eq('email', email).maybeSingle();
-        if (profile && (profile.status === 'APPROVED' || profile.status === 'PENDING' || !profile.password)) {
-          alert('Je account is nog niet volledig geactiveerd. Gebruik de link in je mail of de activatieknop.');
+        if (profile && profile.status === 'PENDING') {
+          alert('Je aanvraag is nog in behandeling door een administrator.');
           return;
         }
-        alert('Foutieve inloggegevens.');
+        if (profile && profile.status === 'APPROVED') {
+          alert('Je account is goedgekeurd! Stel eerst je wachtwoord in via de link in je e-mail.');
+          return;
+        }
+        alert('E-mail of wachtwoord onjuist.');
         return;
       }
       if (data.user) await checkSession();
@@ -106,10 +161,11 @@ const App: React.FC = () => {
   };
 
   const handleDemoLogin = (role: Role) => {
+    // Demo login voor snelle preview
     const mockUser: User = {
-      id: role === 'ADMIN' ? 'demo-admin-id' : 'demo-coach-id',
+      id: role === 'ADMIN' ? 'demo-admin' : 'demo-coach',
       name: role === 'ADMIN' ? 'Demo Admin' : 'Demo Coach',
-      email: role === 'ADMIN' ? 'admin@elftal.be' : 'coach@elftal.be',
+      email: role === 'ADMIN' ? 'admin@demo.be' : 'coach@demo.be',
       role: role,
       status: 'ACTIVE'
     };
@@ -127,42 +183,65 @@ const App: React.FC = () => {
   const handleSubscribeRequest = async (email: string, name: string) => {
     try {
       const { error } = await supabase.from('profiles').insert([{ email, name, role: 'COACH', status: 'PENDING' }]);
-      if (error) throw error;
-      alert('Aanvraag verzonden! Een admin zal je account bekijken.');
-      await fetchData();
+      if (error) {
+        if (error.code === '23505') alert('Dit e-mailadres heeft al een aanvraag ingediend.');
+        else throw error;
+      } else {
+        alert('Bedankt! Je aanvraag is verzonden naar de administratie.');
+        await fetchData();
+      }
     } catch (err: any) { alert('Aanvraag mislukt.'); }
   };
 
   const handleApproveUser = async (id: string) => {
     try {
-      // We zetten de status op APPROVED. In een echte productie omgeving zou je hier een 
-      // Edge Function aanroepen die de Supabase Auth invite verstuurt.
-      const { error } = await supabase.from('profiles').update({ status: 'APPROVED' }).eq('id', id);
-      if (error) throw error;
-      alert('Gebruiker goedgekeurd. De coach kan nu zijn wachtwoord instellen via de activatie-URL.');
+      const user = allUsers.find(u => u.id === id || (u as any).email === id);
+      const email = user?.email;
+
+      // 1. Update status naar APPROVED in de database
+      const { error: updateError } = await supabase.from('profiles').update({ status: 'APPROVED' }).eq('email', email);
+      if (updateError) throw updateError;
+
+      // 2. Verstuur activatie-instructies (Simulatie via Supabase Auth reset password flow)
+      // Dit stuurt een officiële e-mail naar de gebruiker om een wachtwoord te kiezen
+      const { error: authError } = await supabase.auth.resetPasswordForEmail(email!, {
+        redirectTo: `${window.location.origin}/?activate=${encodeURIComponent(email!)}`,
+      });
+
+      if (authError) console.warn("Auth Mail Error:", authError.message);
+      
+      alert('Coach goedgekeurd! Er is een e-mail verzonden naar ' + email + ' om een wachtwoord in te stellen.');
       await fetchData();
-    } catch (err: any) { alert('Fout: ' + err.message); }
+    } catch (err: any) { alert('Fout bij goedkeuren: ' + err.message); }
   };
 
   const handleSetPassword = async (pass: string) => {
     if (!activationEmail) return;
     try {
-      // Supabase Auth signUp verstuurt automatisch een email ter bevestiging 
-      // mits ingeschakeld in het dashboard.
+      // Gebruik signUp voor nieuwe gebruikers of updatePassword voor bestaande invitees
       const { data, error } = await supabase.auth.signUp({ email: activationEmail, password: pass });
+      
       if (error) {
         if (error.message.includes("already registered")) {
-          alert("Dit e-mailadres is al geactiveerd.");
-          return;
+          // Als ze al in Auth staan (via de invite/approve stap), update dan het wachtwoord
+          const { error: updateError } = await supabase.auth.updateUser({ password: pass });
+          if (updateError) throw updateError;
+        } else {
+          throw error;
         }
-        throw error;
       }
-      if (data.user) {
-        await supabase.from('profiles').update({ id: data.user.id, status: 'ACTIVE', password: 'AUTH_MANAGED' }).eq('email', activationEmail);
-        alert('Account succesvol aangemaakt! Check je mail voor de allerlaatste bevestiging.');
-        setView('LANDING');
-      }
-    } catch (err: any) { alert('Fout: ' + err.message); throw err; }
+
+      await supabase.from('profiles').update({ 
+        status: 'ACTIVE', 
+        password: 'AUTH_MANAGED' 
+      }).eq('email', activationEmail);
+
+      alert('Wachtwoord ingesteld! Je kunt nu inloggen.');
+      setView('LANDING');
+    } catch (err: any) { 
+      alert('Fout bij instellen wachtwoord: ' + err.message); 
+      throw err; 
+    }
   };
 
   const handleLogout = async () => {
@@ -171,28 +250,23 @@ const App: React.FC = () => {
     setView('LANDING');
   };
 
-  // Fixed: Added missing handleToggleStatus function to resolve the error on line 222
   const handleToggleStatus = async (id: string, currentStatus: UserStatus) => {
     try {
       const newStatus: UserStatus = currentStatus === 'INACTIVE' ? 'ACTIVE' : 'INACTIVE';
       const { error } = await supabase.from('profiles').update({ status: newStatus }).eq('id', id);
       if (error) throw error;
       await fetchData();
-    } catch (err: any) {
-      alert('Fout bij wijzigen status: ' + err.message);
-    }
+    } catch (err: any) { alert('Fout: ' + err.message); }
   };
 
   const handleSaveExercise = async (ex: Exercise) => {
     try {
       const isExisting = exercises.some(e => e.id === ex.id && !ex.id.startsWith('demo'));
       if (isExisting) {
-        const { error } = await supabase.from('exercises').update(ex).eq('id', ex.id);
-        if (error) throw error;
+        await supabase.from('exercises').update(ex).eq('id', ex.id);
       } else {
         const { id, createdAt, ...newExData } = ex;
-        const { error } = await supabase.from('exercises').insert([newExData]);
-        if (error) throw error;
+        await supabase.from('exercises').insert([newExData]);
       }
       await fetchData();
       setEditingExercise(null);
@@ -204,12 +278,10 @@ const App: React.FC = () => {
     try {
       const isExisting = articles.some(a => a.id === art.id && !art.id.startsWith('art-'));
       if (isExisting) {
-        const { error } = await supabase.from('articles').update(art).eq('id', art.id);
-        if (error) throw error;
+        await supabase.from('articles').update(art).eq('id', art.id);
       } else {
         const { id, ...newArtData } = art;
-        const { error } = await supabase.from('articles').insert([newArtData]);
-        if (error) throw error;
+        await supabase.from('articles').insert([newArtData]);
       }
       await fetchData();
       setEditingArticle(null);
