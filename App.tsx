@@ -30,7 +30,7 @@ const App: React.FC = () => {
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
 
   useEffect(() => {
-    console.log("App initialisatie...");
+    console.log("🚀 App start...");
     const init = async () => {
       await fetchData();
       const sessionActive = await checkSession();
@@ -41,14 +41,10 @@ const App: React.FC = () => {
     };
     init();
 
-    // De enige bron van waarheid voor auth status
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Auth Event:", event);
+      console.log("🔔 Auth Event:", event);
       if (session) {
-        const profileFound = await checkSession();
-        if (profileFound) {
-          setIsLoginModalOpen(false);
-        }
+        await checkSession();
       } else {
         setCurrentUser(null);
         if (view !== 'SET_PASSWORD') setView('LANDING');
@@ -73,133 +69,107 @@ const App: React.FC = () => {
     try {
       const adminEmail = process.env.ADMIN_EMAIL;
       const adminPass = process.env.ADMIN_PASSWORD;
+      if (!adminEmail || !adminPass) return;
 
-      if (!adminEmail || !adminPass) {
-        console.warn("Admin omgevingsvariabelen ontbreken. Overslaan admin-check.");
-        return;
-      }
-
-      const { data: admins } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('role', 'ADMIN')
-        .limit(1);
-
+      const { data: admins } = await supabase.from('profiles').select('id').eq('role', 'ADMIN').limit(1);
       if (!admins || admins.length === 0) {
-        console.log("Geen admin gevonden, poging tot aanmaken...");
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-          email: adminEmail,
-          password: adminPass,
+          email: adminEmail, password: adminPass
         });
-
         let userId = signInData.user?.id;
-
         if (signInError) {
           const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email: adminEmail,
-            password: adminPass,
+            email: adminEmail, password: adminPass
           });
           if (!signUpError) userId = signUpData.user?.id;
         }
-
         if (userId) {
           await supabase.from('profiles').upsert({
-            id: userId,
-            email: adminEmail,
-            name: 'Hoofd Administrator',
-            role: 'ADMIN',
-            status: 'ACTIVE'
+            id: userId, email: adminEmail, name: 'Hoofd Administrator', role: 'ADMIN', status: 'ACTIVE'
           });
         }
-        await fetchData();
       }
-    } catch (err) {
-      console.error("Fout bij admin initialisatie:", err);
-    }
+    } catch (err) { console.error("Admin init fout:", err); }
   };
 
   const fetchData = async () => {
     try {
-      const { data: exData } = await supabase.from('exercises').select('*').order('createdAt', { ascending: false });
+      const { data: exData } = await supabase.from('exercises').select('*');
       if (exData) setExercises(exData);
-
-      const { data: artData } = await supabase.from('articles').select('*').order('date', { ascending: false });
+      const { data: artData } = await supabase.from('articles').select('*');
       if (artData) setArticles(artData);
-
-      const { data: podData } = await supabase.from('podcasts').select('*').order('date', { ascending: false });
-      if (podData) setPodcasts(podData);
-
-      const { data: usersData } = await supabase.from('profiles').select('*').order('status', { ascending: true });
+      const { data: usersData } = await supabase.from('profiles').select('*');
       if (usersData) setAllUsers(usersData);
-    } catch (err) {
-      console.error("Fout bij ophalen data:", err);
-    }
+    } catch (err) { console.error("Data fetch fout:", err); }
   };
 
   const checkSession = async () => {
-    console.log("Sessie controleren...");
+    console.log("🔍 Sessie controleren...");
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) {
-        console.log("Geen actieve sessie.");
+        console.log("❌ Geen sessie.");
         return false;
       }
 
+      console.log("📡 Profiel ophalen voor UID:", session.user.id);
       const { data: profile, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', session.user.id)
-        .maybeSingle();
+        .single();
       
       if (error) {
-        console.error("Profiel ophaalfout:", error);
+        console.error("❗ Database fout bij profiel ophalen:", error.message);
+        // Als we hier komen, maar wel een user hebben, sluiten we de modal sowieso
+        setIsLoginModalOpen(false);
         return false;
       }
 
       if (profile) {
-        console.log("Profiel gevonden:", profile.name);
+        console.log("✅ Profiel gevonden:", profile.name);
         if (profile.status === 'INACTIVE') {
           await handleLogout();
           alert('Je account is gedeactiveerd.');
           return false;
         }
         setCurrentUser(profile);
+        setIsLoginModalOpen(false);
         if (view === 'LANDING') setView('DASHBOARD');
         return true;
       } else {
-        console.warn("Gebruiker ingelogd in Auth, maar geen profiel in database.");
+        console.warn("⚠️ Geen profiel in database.");
+        setIsLoginModalOpen(false);
         return false;
       }
     } catch (err) {
-      console.error("Sessie check error:", err);
+      console.error("💥 Crash in checkSession:", err);
+      setIsLoginModalOpen(false);
       return false;
     }
   };
 
   const handleLoginAttempt = async (email: string, pass: string) => {
-    console.log("Inlogpoging voor:", email);
+    console.log("🔑 Login poging voor:", email);
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
       
       if (error) {
-        console.error("Login fout:", error.message);
+        console.error("❌ Auth fout:", error.message);
         const { data: profile } = await supabase.from('profiles').select('status').eq('email', email).maybeSingle();
-        
-        if (profile?.status === 'PENDING') {
-          alert('Je aanvraag is nog in behandeling.');
-        } else if (profile?.status === 'APPROVED') {
-          alert('Je account is goedgekeurd! Stel eerst je wachtwoord in via de mail.');
-        } else {
-          alert(`Inloggen mislukt: ${error.message}`);
-        }
+        if (profile?.status === 'PENDING') alert('Je aanvraag is nog in behandeling.');
+        else if (profile?.status === 'APPROVED') alert('Activeer eerst je wachtwoord via de mail.');
+        else alert(`Inloggen mislukt: ${error.message}`);
         return;
       }
       
-      console.log("Auth succesvol voor:", data.user?.email);
-      // De useEffect/onAuthStateChange handelt de rest af
+      if (data.user) {
+        console.log("🚀 Auth succes! Wachten op profiel...");
+        // checkSession wordt getriggerd door onAuthStateChange
+      }
     } catch (err) { 
-      console.error("Onverwachte login fout:", err);
-      alert('Verbindingsfout met de server.'); 
+      console.error("💥 Crash in handleLoginAttempt:", err);
+      alert('Er ging iets mis bij het inloggen.'); 
     }
   };
 
@@ -226,14 +196,10 @@ const App: React.FC = () => {
     try {
       const { error } = await supabase.auth.updateUser({ password: pass });
       if (error) throw error;
-
       await supabase.from('profiles').update({ status: 'ACTIVE' }).eq('email', activationEmail);
       alert('Klaar! Je kunt nu inloggen.');
       setView('LANDING');
-    } catch (err: any) { 
-      alert(`Fout: ${err.message}`); 
-      throw err; 
-    }
+    } catch (err: any) { alert(`Fout: ${err.message}`); throw err; }
   };
 
   const renderView = () => {
