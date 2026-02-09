@@ -32,11 +32,25 @@ const App: React.FC = () => {
   useEffect(() => {
     const init = async () => {
       await fetchData();
-      await checkSession();
-      await ensureAdminExists();
+      const sessionActive = await checkSession();
+      if (!sessionActive) {
+        await ensureAdminExists();
+      }
       handleUrlParameters();
     };
     init();
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!session) {
+        setCurrentUser(null);
+        if (view !== 'SET_PASSWORD') setView('LANDING');
+      } else {
+        checkSession();
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const handleUrlParameters = () => {
@@ -63,30 +77,36 @@ const App: React.FC = () => {
         const adminPass = process.env.ADMIN_PASSWORD;
 
         if (adminEmail && adminPass) {
-          const { data: authData, error: authError } = await supabase.auth.signUp({
+          // Probeer aan te melden, als dat faalt, probeer te registreren
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
             email: adminEmail,
             password: adminPass,
           });
 
-          if (authError && !authError.message.includes("already registered")) {
-            console.error("Admin Auth Error:", authError.message);
-            return;
+          let userId = signInData.user?.id;
+
+          if (signInError) {
+            const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+              email: adminEmail,
+              password: adminPass,
+            });
+            if (!signUpError) userId = signUpData.user?.id;
           }
 
-          const adminUserId = authData.user?.id;
-          const { error: profileError } = await supabase.from('profiles').upsert({
-            email: adminEmail,
-            name: 'Hoofd Administrator',
-            role: 'ADMIN',
-            status: 'ACTIVE',
-            id: adminUserId || undefined
-          }, { onConflict: 'email' });
-
-          if (!profileError) await fetchData();
+          if (userId) {
+            await supabase.from('profiles').upsert({
+              id: userId,
+              email: adminEmail,
+              name: 'Hoofd Administrator',
+              role: 'ADMIN',
+              status: 'ACTIVE'
+            });
+          }
+          await fetchData();
         }
       }
     } catch (err) {
-      console.error("Fout bij checken admin status:", err);
+      console.error("Admin check fail:", err);
     }
   };
 
@@ -102,9 +122,9 @@ const App: React.FC = () => {
       if (podData) setPodcasts(podData);
 
       const { data: usersData } = await supabase.from('profiles').select('*').order('status', { ascending: true });
-      if (usersData) setAllUsers(usersData || []);
+      if (usersData) setAllUsers(usersData);
     } catch (err) {
-      console.error("Fout bij ophalen Supabase data:", err);
+      console.error("Fetch error:", err);
     }
   };
 
@@ -115,23 +135,22 @@ const App: React.FC = () => {
         const { data: profile } = await supabase
           .from('profiles')
           .select('*')
-          .eq('email', session.user.email)
+          .eq('id', session.user.id)
           .maybeSingle();
         
         if (profile) {
           if (profile.status === 'INACTIVE') {
             await handleLogout();
-            alert('Dit account is gedeactiveerd.');
-            return;
+            alert('Account gedeactiveerd.');
+            return false;
           }
           setCurrentUser(profile);
-          if (view === 'LANDING' || view === 'SET_PASSWORD') setView('DASHBOARD');
+          if (view === 'LANDING') setView('DASHBOARD');
           return true;
         }
       }
       return false;
     } catch (err) {
-      console.error("Session check error:", err);
       return false;
     }
   };
@@ -141,22 +160,15 @@ const App: React.FC = () => {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
       if (error) {
         const { data: profile } = await supabase.from('profiles').select('*').eq('email', email).maybeSingle();
-        if (profile && profile.status === 'PENDING') {
-          alert('Je aanvraag is nog in behandeling.');
-          return;
-        }
-        if (profile && profile.status === 'APPROVED') {
-          alert('Account goedgekeurd! Activeer eerst je wachtwoord via de mail.');
-          return;
-        }
-        alert('E-mail of wachtwoord onjuist.');
+        if (profile?.status === 'PENDING') return alert('Aanvraag in behandeling.');
+        if (profile?.status === 'APPROVED') return alert('Eerst activeren via mail!');
+        alert('Foutieve gegevens.');
         return;
       }
+      
       if (data.user) {
-        const sessionActive = await checkSession();
-        if (sessionActive) {
-          setIsLoginModalOpen(false); // Sluit de modal na succesvol inloggen
-        }
+        const ok = await checkSession();
+        if (ok) setIsLoginModalOpen(false);
       }
     } catch (err) { alert('Verbindingsfout.'); }
   };
@@ -174,122 +186,51 @@ const App: React.FC = () => {
     setView('DASHBOARD');
   };
 
-  const handleActivateAccount = (email: string) => {
-    setActivationEmail(email);
-    setIsLoginModalOpen(false);
-    setView('SET_PASSWORD');
-  };
-
-  const handleSubscribeRequest = async (email: string, name: string) => {
-    try {
-      const { error } = await supabase.from('profiles').insert([{ email, name, role: 'COACH', status: 'PENDING' }]);
-      if (error) {
-        if (error.code === '23505') alert('Dit e-mailadres is al bekend.');
-        else throw error;
-      } else {
-        alert('Aanvraag verzonden! Een admin zal je account bekijken.');
-        await fetchData();
-      }
-    } catch (err: any) { alert('Aanvraag mislukt.'); }
-  };
-
-  const handleApproveUser = async (id: string) => {
-    try {
-      const user = allUsers.find(u => u.id === id || (u as any).email === id);
-      const email = user?.email;
-
-      const { error: updateError } = await supabase.from('profiles').update({ status: 'APPROVED' }).eq('email', email);
-      if (updateError) throw updateError;
-
-      const { error: authError } = await supabase.auth.resetPasswordForEmail(email!, {
-        redirectTo: `${window.location.origin}/?activate=${encodeURIComponent(email!)}`,
-      });
-
-      if (authError) console.warn("Auth Mail Error:", authError.message);
-      
-      alert('Coach goedgekeurd! Activatie-mail verzonden.');
-      await fetchData();
-    } catch (err: any) { alert('Fout bij goedkeuren: ' + err.message); }
-  };
-
-  const handleSetPassword = async (pass: string) => {
-    if (!activationEmail) return;
-    try {
-      const { data, error } = await supabase.auth.signUp({ email: activationEmail, password: pass });
-      
-      if (error) {
-        if (error.message.includes("already registered")) {
-          const { error: updateError } = await supabase.auth.updateUser({ password: pass });
-          if (updateError) throw updateError;
-        } else throw error;
-      }
-
-      await supabase.from('profiles').update({ status: 'ACTIVE' }).eq('email', activationEmail);
-      alert('Wachtwoord ingesteld! Log nu in.');
-      setView('LANDING');
-    } catch (err: any) { alert('Fout: ' + err.message); throw err; }
-  };
-
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setCurrentUser(null);
     setView('LANDING');
   };
 
-  const handleToggleStatus = async (id: string, currentStatus: UserStatus) => {
+  const handleSetPassword = async (pass: string) => {
     try {
-      const newStatus: UserStatus = currentStatus === 'INACTIVE' ? 'ACTIVE' : 'INACTIVE';
-      const { error } = await supabase.from('profiles').update({ status: newStatus }).eq('id', id);
+      const { error } = await supabase.auth.updateUser({ password: pass });
       if (error) throw error;
-      await fetchData();
-    } catch (err: any) { alert('Fout: ' + err.message); }
-  };
 
-  const handleSaveExercise = async (ex: Exercise) => {
-    try {
-      const isExisting = exercises.some(e => e.id === ex.id && !ex.id.startsWith('demo'));
-      if (isExisting) {
-        await supabase.from('exercises').update(ex).eq('id', ex.id);
-      } else {
-        const { id, createdAt, ...newExData } = ex;
-        await supabase.from('exercises').insert([newExData]);
-      }
-      await fetchData();
-      setEditingExercise(null);
-      setView('EXERCISES');
-    } catch (err: any) { alert(err.message); }
-  };
-
-  const handleSaveArticle = async (art: Article) => {
-    try {
-      const isExisting = articles.some(a => a.id === art.id && !art.id.startsWith('art-'));
-      if (isExisting) {
-        await supabase.from('articles').update(art).eq('id', art.id);
-      } else {
-        const { id, ...newArtData } = art;
-        await supabase.from('articles').insert([newArtData]);
-      }
-      await fetchData();
-      setEditingArticle(null);
-      setView('BLOG');
-    } catch (err: any) { alert(err.message); }
+      await supabase.from('profiles').update({ status: 'ACTIVE' }).eq('email', activationEmail);
+      alert('Klaar! Je kunt nu inloggen.');
+      setView('LANDING');
+    } catch (err: any) { alert(err.message); throw err; }
   };
 
   const renderView = () => {
     if (view === 'SET_PASSWORD') return <SetPasswordView onSave={handleSetPassword} email={activationEmail} onCancel={() => setView('LANDING')} />;
-    if (!currentUser || view === 'LANDING') return <LandingPage onLogin={() => setIsLoginModalOpen(true)} onSubscribe={handleSubscribeRequest} />;
+    if (!currentUser || view === 'LANDING') return <LandingPage onLogin={() => setIsLoginModalOpen(true)} onSubscribe={(email, name) => {
+      supabase.from('profiles').insert([{ email, name, role: 'COACH', status: 'PENDING' }]).then(() => fetchData());
+    }} />;
 
     switch (view) {
       case 'DASHBOARD': return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} />;
       case 'EXERCISES': return <ExerciseList exercises={exercises} onAdd={() => setView('CREATE_EXERCISE')} onEdit={(ex) => { setEditingExercise(ex); setView('EDIT_EXERCISE'); }} isAdmin={currentUser.role === 'ADMIN'} />;
-      case 'CREATE_EXERCISE': return <ExerciseForm onSave={handleSaveExercise} onCancel={() => setView('EXERCISES')} />;
-      case 'EDIT_EXERCISE': return <ExerciseForm onSave={handleSaveExercise} onCancel={() => setView('EXERCISES')} initialData={editingExercise || undefined} />;
+      case 'CREATE_EXERCISE': return <ExerciseForm onSave={async (ex) => { 
+        const { id, createdAt, ...data } = ex;
+        await supabase.from('exercises').insert([data]);
+        await fetchData();
+        setView('EXERCISES');
+      }} onCancel={() => setView('EXERCISES')} />;
+      case 'EDIT_EXERCISE': return <ExerciseForm onSave={async (ex) => {
+        await supabase.from('exercises').update(ex).eq('id', ex.id);
+        await fetchData();
+        setView('EXERCISES');
+      }} onCancel={() => setView('EXERCISES')} initialData={editingExercise || undefined} />;
       case 'BLOG': return <BlogView articles={articles} isAdmin={currentUser.role === 'ADMIN'} onAddArticle={() => setView('CREATE_ARTICLE')} onEditArticle={(art) => { setEditingArticle(art); setView('EDIT_ARTICLE'); }} onViewArticle={(art) => { setSelectedArticle(art); setView('VIEW_ARTICLE'); }} />;
       case 'VIEW_ARTICLE': return selectedArticle ? <ArticleDetail article={selectedArticle} onBack={() => setView('BLOG')} /> : null;
-      case 'CREATE_ARTICLE': return <ArticleForm onSave={handleSaveArticle} onCancel={() => setView('BLOG')} />;
-      case 'EDIT_ARTICLE': return <ArticleForm onSave={handleSaveArticle} onCancel={() => setView('BLOG')} initialData={editingArticle || undefined} />;
-      case 'PODCASTS': return <PodcastView podcasts={podcasts} isAdmin={currentUser.role === 'ADMIN'} onAddPodcast={() => {}} />;
-      case 'ADMIN_USERS': return <AdminUserView users={allUsers} onApprove={handleApproveUser} onUpdateRole={(id, r) => supabase.from('profiles').update({ role: r }).eq('id', id).then(fetchData)} onToggleStatus={handleToggleStatus} currentAdminId={currentUser.id} />;
+      case 'ADMIN_USERS': return <AdminUserView users={allUsers} onApprove={async (id) => {
+        const user = allUsers.find(u => u.id === id || u.email === id);
+        await supabase.from('profiles').update({ status: 'APPROVED' }).eq('email', user?.email);
+        await supabase.auth.resetPasswordForEmail(user!.email, { redirectTo: `${window.location.origin}/?activate=${user!.email}` });
+        await fetchData();
+      }} onUpdateRole={(id, r) => supabase.from('profiles').update({ role: r }).eq('id', id).then(fetchData)} onToggleStatus={(id, s) => supabase.from('profiles').update({ status: s === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' }).eq('id', id).then(fetchData)} currentAdminId={currentUser.id} />;
       default: return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} />;
     }
   };
@@ -298,7 +239,7 @@ const App: React.FC = () => {
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
       {currentUser && view !== 'LANDING' && <Navbar userRole={currentUser.role} currentView={view} setView={setView} onLogout={handleLogout} />}
       <main className="flex-grow">{renderView()}</main>
-      {isLoginModalOpen && <LoginModal onClose={() => setIsLoginModalOpen(false)} onLogin={handleLoginAttempt} onActivate={handleActivateAccount} onDemoLogin={handleDemoLogin} />}
+      {isLoginModalOpen && <LoginModal onClose={() => setIsLoginModalOpen(false)} onLogin={handleLoginAttempt} onActivate={setActivationEmail} onDemoLogin={handleDemoLogin} />}
     </div>
   );
 };
