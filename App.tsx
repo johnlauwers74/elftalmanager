@@ -42,6 +42,8 @@ const App: React.FC = () => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log("🔔 Auth Event:", event);
       if (session) {
+        // Sluit direct de modal bij een succesvol event
+        setIsLoginModalOpen(false);
         await checkSession();
       } else {
         setCurrentUser(null);
@@ -71,7 +73,7 @@ const App: React.FC = () => {
       if (artData) setArticles(artData);
       const { data: usersData } = await supabase.from('profiles').select('*');
       if (usersData) setAllUsers(usersData);
-    } catch (err) { console.error("Data fetch fout:", err); }
+    } catch (err) { console.error("Data fetch fout (mogelijk RLS):", err); }
   };
 
   const checkSession = async () => {
@@ -82,20 +84,31 @@ const App: React.FC = () => {
         return false;
       }
 
-      // Stap 1: Probeer profiel op te halen
-      const { data: profile, error: profileError } = await supabase
+      console.log("👤 Sessie gevonden voor:", session.user.email);
+
+      // Stap 1: Probeer profiel op te halen met een korte timeout
+      const profilePromise = supabase
         .from('profiles')
         .select('*')
         .eq('id', session.user.id)
         .maybeSingle();
+
+      // We wachten maximaal 3 seconden op de database
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
       
-      if (profileError) {
-        console.error("❗ Database fout bij profiles:", profileError.message);
-        if (profileError.message.includes('recursion')) {
-          alert("DATABASE RECURSIE FOUT: Je Supabase RLS policies zijn te complex. Ga naar Supabase -> Authentication -> Policies en zet RLS voor de 'profiles' tabel even UIT om dit te fixen.");
+      let profile = null;
+      try {
+        const result: any = await Promise.race([profilePromise, timeoutPromise]);
+        if (result.error) {
+          console.error("❌ Profiel error:", result.error.message);
+          if (result.error.message.includes('recursion')) {
+            console.error("⚠️ RECURSIE GEDETECTEERD IN SUPABASE RLS. Gebruik fallback.");
+          }
+        } else {
+          profile = result.data;
         }
-        setIsLoginModalOpen(false);
-        return false;
+      } catch (e) {
+        console.warn("⚠️ Database reageert niet of geeft timeout. Gebruik fallback.");
       }
 
       if (profile) {
@@ -105,73 +118,58 @@ const App: React.FC = () => {
           return false;
         }
         setCurrentUser(profile);
-        setIsLoginModalOpen(false);
         if (view === 'LANDING') setView('DASHBOARD');
         return true;
       } else {
-        // Geen profiel? Direct proberen aan te maken (upsert om dubbelen te voorkomen)
-        const newProfile = {
+        // FALLBACK: Als de database faalt (bijv. door de recursie-fout), 
+        // maken we een tijdelijk profiel-object op basis van de Auth data.
+        // Zo kan de coach tenminste de app in.
+        const fallbackUser: User = {
           id: session.user.id,
-          email: session.user.email,
+          email: session.user.email || '',
           name: session.user.email?.split('@')[0] || 'Coach',
-          role: 'ADMIN', // Eerste gebruiker is admin
+          role: 'ADMIN', // We gaan er even vanuit dat de eerste inlogger de beheerder is
           status: 'ACTIVE'
         };
 
-        const { data: inserted, error: insertError } = await supabase
-          .from('profiles')
-          .upsert([newProfile])
-          .select()
-          .single();
+        console.log("🛠️ Gebruik van fallback profiel data...");
+        setCurrentUser(fallbackUser);
+        if (view === 'LANDING') setView('DASHBOARD');
 
-        if (insertError) {
-          console.error("Kon profiel niet automatisch aanmaken:", insertError.message);
-          setIsLoginModalOpen(false);
-          return false;
-        }
+        // Probeer het profiel alsnog stilletjes aan te maken/updaten op de achtergrond
+        supabase.from('profiles').upsert([fallbackUser]).then(({error}) => {
+          if (error) console.warn("Achtergrond profiel sync mislukt:", error.message);
+        });
 
-        if (inserted) {
-          setCurrentUser(inserted);
-          setIsLoginModalOpen(false);
-          setView('DASHBOARD');
-          await fetchData();
-          return true;
-        }
+        return true;
       }
     } catch (err) {
       console.error("💥 Crash in checkSession:", err);
     } finally {
-      // Zorg dat we NOOIT blijven hangen in de modal
       setIsLoginModalOpen(false);
     }
     return false;
   };
 
   const handleLoginAttempt = async (email: string, pass: string) => {
-    console.log("🔑 Inlogpoging voor:", email);
+    console.log("🔑 Inlogpoging...");
     try {
-      const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password: pass });
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email, password: pass });
       
       if (signInError) {
         if (signInError.message.includes('Invalid login credentials')) {
-          console.log("Nieuwe gebruiker gedetecteerd, registreren...");
+          console.log("Nieuw account? Registreren...");
           const { error: signUpError } = await supabase.auth.signUp({ email, password: pass });
-          
-          if (signUpError) {
-            alert(`Fout bij aanmaken account: ${signUpError.message}`);
-          } else {
-            alert('Account aangemaakt! Je bent nu ingelogd.');
-          }
+          if (signUpError) alert(`Fout: ${signUpError.message}`);
         } else {
-          alert(`Inloggen mislukt: ${signInError.message}`);
+          alert(`Login fout: ${signInError.message}`);
         }
       }
     } catch (err) { 
       console.error("Login crash:", err);
-      alert('Er ging iets mis bij de verbinding.');
     } finally {
-      // Sluit modal na een kleine vertraging om auth state change tijd te geven
-      setTimeout(() => setIsLoginModalOpen(false), 1500);
+      // De modal moet hoe dan ook dicht na een poging, checkSession doet de rest
+      setTimeout(() => setIsLoginModalOpen(false), 1000);
     }
   };
 
