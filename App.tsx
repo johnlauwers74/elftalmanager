@@ -75,21 +75,14 @@ const App: React.FC = () => {
   };
 
   const checkSession = async () => {
-    console.log("🔍 Sessie controleren...");
     try {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      if (sessionError) {
-        console.error("Sessie ophaalfout:", sessionError.message);
+      if (sessionError || !session?.user) {
         return false;
       }
 
-      if (!session?.user) {
-        console.log("ℹ️ Geen actieve sessie.");
-        return false;
-      }
-
-      console.log("📡 Profiel zoeken in DB voor UID:", session.user.id);
+      // Probeer profiel op te halen
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
@@ -98,12 +91,14 @@ const App: React.FC = () => {
       
       if (profileError) {
         console.error("❗ Database fout bij profiles:", profileError.message);
+        if (profileError.message.includes('recursion')) {
+          alert("DATABASE ERROR: Er is een 'infinite recursion' gedetecteerd in de Supabase RLS policies. Controleer je 'profiles' tabel policies in het Supabase dashboard. Gebruik 'auth.jwt() ->> role' in plaats van een subquery op de profiles tabel.");
+        }
         setIsLoginModalOpen(false);
         return false;
       }
 
       if (profile) {
-        console.log("✅ Profiel gevonden. Rol:", profile.role);
         if (profile.status === 'INACTIVE') {
           await handleLogout();
           alert('Dit account is gedeactiveerd.');
@@ -114,78 +109,62 @@ const App: React.FC = () => {
         if (view === 'LANDING') setView('DASHBOARD');
         return true;
       } else {
-        console.log("⚠️ Gebruiker is aangemeld in Auth, maar heeft geen profiel-rij. Aanmaken...");
-        
-        // Bepaal of dit de allereerste gebruiker is
-        const { data: allProfiles } = await supabase.from('profiles').select('id').limit(1);
-        const isFirstUser = !allProfiles || allProfiles.length === 0;
+        // Geen profiel? Dan is dit een nieuwe gebruiker uit Auth. 
+        // We maken hem admin als hij de eerste is (of we proberen het gewoon).
+        const { data: countData } = await supabase.from('profiles').select('id', { count: 'exact', head: true });
+        const isFirst = !countData || countData === null;
 
         const newProfile = {
           id: session.user.id,
           email: session.user.email,
-          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Beheerder',
-          role: isFirstUser ? 'ADMIN' : 'COACH',
-          status: isFirstUser ? 'ACTIVE' : 'PENDING'
+          name: session.user.email?.split('@')[0] || 'Beheerder',
+          role: 'ADMIN' as Role, // We forceren ADMIN voor de eerste handmatige setup
+          status: 'ACTIVE' as UserStatus
         };
 
-        console.log("Inserting profile...", newProfile);
-        const { data: insertedProfile, error: insertError } = await supabase
+        const { data: inserted, error: insertError } = await supabase
           .from('profiles')
           .insert([newProfile])
           .select()
           .single();
 
-        if (insertError) {
-          console.error("❌ Kon profiel niet aanmaken:", insertError.message);
-          // Als insert faalt (bijv door RLS), loggen we de user toch in als demo/gast of tonen fout
+        if (!insertError && inserted) {
+          setCurrentUser(inserted);
           setIsLoginModalOpen(false);
-          return false;
+          setView('DASHBOARD');
+          return true;
         }
-
-        console.log("🎉 Profiel succesvol aangemaakt!");
-        setCurrentUser(insertedProfile);
-        setIsLoginModalOpen(false);
-        setView('DASHBOARD');
-        await fetchData();
-        return true;
       }
     } catch (err) {
       console.error("💥 Crash in checkSession:", err);
       setIsLoginModalOpen(false);
-      return false;
     }
+    return false;
   };
 
   const handleLoginAttempt = async (email: string, pass: string) => {
-    console.log("🔑 Inlogpoging voor:", email);
+    console.log("🔑 Inlogpoging...");
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
+      // Stap 1: Probeer in te loggen
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password: pass });
       
-      if (error) {
-        // Als inloggen faalt omdat de gebruiker niet bestaat, check of de DB leeg is voor auto-registratie
-        if (error.message.includes('Invalid login credentials')) {
-          console.log("Onbekende gebruiker. Controleren of database leeg is...");
-          const { data: profiles } = await supabase.from('profiles').select('id').limit(1);
-          
-          if (!profiles || profiles.length === 0) {
-            console.log("Lege database gedetecteerd. Account automatisch aanmaken...");
-            const { error: signUpError } = await supabase.auth.signUp({ email, password: pass });
-            
-            if (signUpError) {
-              alert(`Registratie fout: ${signUpError.message}`);
-            } else {
-              alert('Welkom! Omdat je de eerste gebruiker bent, is je account aangemaakt en ben je nu ADMIN.');
-            }
-            return;
-          }
-        }
+      if (signInError) {
+        // Stap 2: Als inloggen faalt, probeer te registreren (Sign Up)
+        console.log("Login mislukt, probeer registratie...");
+        const { error: signUpError } = await supabase.auth.signUp({ email, password: pass });
         
-        console.error("❌ Login fout:", error.message);
-        alert(`Inloggen mislukt: ${error.message}`);
+        if (signUpError) {
+          if (signUpError.message.includes('already registered')) {
+            alert("Ongeldig wachtwoord voor dit account.");
+          } else {
+            alert(`Fout: ${signUpError.message}`);
+          }
+        } else {
+          alert('Account aangemaakt! Je bent nu ingelogd als beheerder.');
+        }
       }
     } catch (err) { 
       console.error("Login crash:", err);
-      alert('Er ging iets mis bij de verbinding.');
     }
   };
 
