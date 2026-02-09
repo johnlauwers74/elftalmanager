@@ -30,6 +30,7 @@ const App: React.FC = () => {
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
 
   useEffect(() => {
+    console.log("App initialisatie...");
     const init = async () => {
       await fetchData();
       const sessionActive = await checkSession();
@@ -40,12 +41,17 @@ const App: React.FC = () => {
     };
     init();
 
+    // De enige bron van waarheid voor auth status
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session) {
-        await checkSession();
-      } else if (event === 'SIGNED_OUT') {
+      console.log("Auth Event:", event);
+      if (session) {
+        const profileFound = await checkSession();
+        if (profileFound) {
+          setIsLoginModalOpen(false);
+        }
+      } else {
         setCurrentUser(null);
-        setView('LANDING');
+        if (view !== 'SET_PASSWORD') setView('LANDING');
       }
     });
 
@@ -68,7 +74,10 @@ const App: React.FC = () => {
       const adminEmail = process.env.ADMIN_EMAIL;
       const adminPass = process.env.ADMIN_PASSWORD;
 
-      if (!adminEmail || !adminPass) return;
+      if (!adminEmail || !adminPass) {
+        console.warn("Admin omgevingsvariabelen ontbreken. Overslaan admin-check.");
+        return;
+      }
 
       const { data: admins } = await supabase
         .from('profiles')
@@ -77,6 +86,7 @@ const App: React.FC = () => {
         .limit(1);
 
       if (!admins || admins.length === 0) {
+        console.log("Geen admin gevonden, poging tot aanmaken...");
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
           email: adminEmail,
           password: adminPass,
@@ -100,8 +110,8 @@ const App: React.FC = () => {
             role: 'ADMIN',
             status: 'ACTIVE'
           });
-          console.log("Admin profiel aangemaakt of bijgewerkt.");
         }
+        await fetchData();
       }
     } catch (err) {
       console.error("Fout bij admin initialisatie:", err);
@@ -127,9 +137,13 @@ const App: React.FC = () => {
   };
 
   const checkSession = async () => {
+    console.log("Sessie controleren...");
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) return false;
+      if (!session?.user) {
+        console.log("Geen actieve sessie.");
+        return false;
+      }
 
       const { data: profile, error } = await supabase
         .from('profiles')
@@ -143,16 +157,17 @@ const App: React.FC = () => {
       }
 
       if (profile) {
+        console.log("Profiel gevonden:", profile.name);
         if (profile.status === 'INACTIVE') {
           await handleLogout();
-          alert('Je account is gedeactiveerd. Neem contact op met de beheerder.');
+          alert('Je account is gedeactiveerd.');
           return false;
         }
         setCurrentUser(profile);
         if (view === 'LANDING') setView('DASHBOARD');
         return true;
       } else {
-        console.warn("Geen profiel gevonden in de database voor deze gebruiker.");
+        console.warn("Gebruiker ingelogd in Auth, maar geen profiel in database.");
         return false;
       }
     } catch (err) {
@@ -162,33 +177,29 @@ const App: React.FC = () => {
   };
 
   const handleLoginAttempt = async (email: string, pass: string) => {
+    console.log("Inlogpoging voor:", email);
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
       
       if (error) {
-        // Specifieke feedback op basis van status in de database
+        console.error("Login fout:", error.message);
         const { data: profile } = await supabase.from('profiles').select('status').eq('email', email).maybeSingle();
         
         if (profile?.status === 'PENDING') {
-          alert('Je aanvraag is nog in behandeling door een administrator.');
+          alert('Je aanvraag is nog in behandeling.');
         } else if (profile?.status === 'APPROVED') {
-          alert('Je account is goedgekeurd! Activeer eerst je wachtwoord via de link in je e-mail.');
+          alert('Je account is goedgekeurd! Stel eerst je wachtwoord in via de mail.');
         } else {
           alert(`Inloggen mislukt: ${error.message}`);
         }
         return;
       }
       
-      if (data.user) {
-        const profileFound = await checkSession();
-        if (profileFound) {
-          setIsLoginModalOpen(false);
-        } else {
-          alert('Je bent ingelogd, maar we konden je profielgegevens niet vinden. Neem contact op met de beheerder.');
-        }
-      }
+      console.log("Auth succesvol voor:", data.user?.email);
+      // De useEffect/onAuthStateChange handelt de rest af
     } catch (err) { 
-      alert('Er is een onverwachte fout opgetreden bij het verbinden met de server.'); 
+      console.error("Onverwachte login fout:", err);
+      alert('Verbindingsfout met de server.'); 
     }
   };
 
@@ -217,10 +228,10 @@ const App: React.FC = () => {
       if (error) throw error;
 
       await supabase.from('profiles').update({ status: 'ACTIVE' }).eq('email', activationEmail);
-      alert('Wachtwoord succesvol ingesteld! Je kunt nu inloggen.');
+      alert('Klaar! Je kunt nu inloggen.');
       setView('LANDING');
     } catch (err: any) { 
-      alert(`Fout bij instellen wachtwoord: ${err.message}`); 
+      alert(`Fout: ${err.message}`); 
       throw err; 
     }
   };
@@ -229,7 +240,7 @@ const App: React.FC = () => {
     if (view === 'SET_PASSWORD') return <SetPasswordView onSave={handleSetPassword} email={activationEmail} onCancel={() => setView('LANDING')} />;
     if (!currentUser || view === 'LANDING') return <LandingPage onLogin={() => setIsLoginModalOpen(true)} onSubscribe={(email, name) => {
       supabase.from('profiles').insert([{ email, name, role: 'COACH', status: 'PENDING' }]).then(() => {
-        alert('Aanvraag verzonden! Een administrator zal je account spoedig beoordelen.');
+        alert('Aanvraag verzonden!');
         fetchData();
       });
     }} />;
@@ -253,8 +264,7 @@ const App: React.FC = () => {
       case 'ADMIN_USERS': return <AdminUserView users={allUsers} onApprove={async (id) => {
         const user = allUsers.find(u => u.id === id || u.email === id);
         await supabase.from('profiles').update({ status: 'APPROVED' }).eq('email', user?.email);
-        const { error } = await supabase.auth.resetPasswordForEmail(user!.email, { redirectTo: `${window.location.origin}/?activate=${user!.email}` });
-        if (error) alert("Email kon niet worden verstuurd, maar status is bijgewerkt.");
+        await supabase.auth.resetPasswordForEmail(user!.email, { redirectTo: `${window.location.origin}/?activate=${user!.email}` });
         await fetchData();
       }} onUpdateRole={(id, r) => supabase.from('profiles').update({ role: r }).eq('id', id).then(fetchData)} onToggleStatus={(id, s) => supabase.from('profiles').update({ status: s === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' }).eq('id', id).then(fetchData)} currentAdminId={currentUser.id} />;
       default: return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} />;
