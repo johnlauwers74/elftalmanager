@@ -5,7 +5,7 @@ import { Role } from '../types';
 
 interface LoginModalProps {
   onClose: () => void;
-  onLogin: (email: string, pass: string) => void;
+  onLogin: (email: string, pass: string) => Promise<void> | void;
   onActivate: (email: string) => void;
   onDemoLogin: (role: Role) => void;
 }
@@ -17,11 +17,21 @@ const LoginModal: React.FC<LoginModalProps> = ({ onClose, onLogin, onActivate, o
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
+    
     setLoading(true);
+    console.log("Login formulier verzonden...");
+    
     try {
+      // We wachten op de login poging. 
+      // Als de App.tsx onAuthStateChange sneller is, zal de modal sluiten via props.
       await onLogin(email, pass);
+    } catch (error) {
+      console.error("Modal login error:", error);
     } finally {
-      setLoading(false);
+      // We zetten loading pas na een korte vertraging uit om flikkering te voorkomen
+      // en om zeker te zijn dat async processen de tijd hebben gehad.
+      setTimeout(() => setLoading(false), 1000);
     }
   };
 
@@ -44,7 +54,6 @@ const LoginModal: React.FC<LoginModalProps> = ({ onClose, onLogin, onActivate, o
         </div>
         
         <div className="p-8 space-y-6">
-          {/* Demo Access Section */}
           <div className="space-y-3">
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest text-center">Direct testen (Demo)</p>
             <div className="grid grid-cols-2 gap-3">
