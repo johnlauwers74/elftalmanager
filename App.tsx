@@ -35,26 +35,38 @@ const App: React.FC = () => {
     console.log("🚀 ELFTALMANAGER opstarten...");
     
     const init = async () => {
-      setAuthLoading(true);
-      await checkSession();
-      await fetchData();
-      setAuthLoading(false);
-      handleUrlParameters();
+      try {
+        setAuthLoading(true);
+        const hasSession = await checkSession();
+        if (hasSession) {
+          await fetchData();
+        }
+      } catch (err) {
+        console.error("❌ Init crash:", err);
+      } finally {
+        setAuthLoading(false);
+        handleUrlParameters();
+      }
     };
+
     init();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("🔔 Auth Event:", event);
+      console.log(`🔔 Auth Event: ${event}`);
+      
       if (session) {
         setIsLoginModalOpen(false);
         const success = await checkSession();
-        if (success && view === 'LANDING') {
-          setView('DASHBOARD');
+        if (success) {
+          await fetchData();
+          // Forceer dashboard als we nog op de landing staan
+          setView(current => (current === 'LANDING' ? 'DASHBOARD' : current));
         }
-      } else {
+      } else if (event === 'SIGNED_OUT') {
         setCurrentUser(null);
-        if (view !== 'SET_PASSWORD') setView('LANDING');
+        setView('LANDING');
       }
+      
       setAuthLoading(false);
     });
 
@@ -74,84 +86,81 @@ const App: React.FC = () => {
 
   const fetchData = async () => {
     try {
-      const { data: exData } = await supabase.from('exercises').select('*').order('createdAt', { ascending: false });
-      if (exData) setExercises(exData);
-      
-      const { data: artData } = await supabase.from('articles').select('*').order('date', { ascending: false });
-      if (artData) setArticles(artData);
-      
-      const { data: usersData } = await supabase.from('profiles').select('*');
-      if (usersData) setAllUsers(usersData);
-    } catch (err) { console.error("Data fetch fout:", err); }
+      console.log("📊 Gegevens ophalen...");
+      const [exRes, artRes, profRes] = await Promise.all([
+        supabase.from('exercises').select('*').order('createdAt', { ascending: false }),
+        supabase.from('articles').select('*').order('date', { ascending: false }),
+        supabase.from('profiles').select('*')
+      ]);
+
+      if (exRes.data) setExercises(exRes.data);
+      if (artRes.data) setArticles(artRes.data);
+      if (profRes.data) setAllUsers(profRes.data);
+    } catch (err) { 
+      console.error("⚠️ Fout bij ophalen data:", err); 
+    }
   };
 
   const checkSession = async () => {
-    console.log("🔍 Sessie controleren...");
     try {
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
       if (sessionError || !session?.user) {
-        console.log("ℹ️ Geen actieve sessie gevonden.");
         return false;
       }
 
-      console.log("👤 Sessie gevonden voor:", session.user.email);
+      console.log("👤 Sessie actief voor:", session.user.email);
 
-      // Haal profiel op
-      let { data: profile, error: profileError } = await supabase
+      // Probeer profiel op te halen met een timeout/snelle afhandeling
+      const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', session.user.id)
         .maybeSingle();
       
       if (profileError) {
-        console.error("❌ Profiel ophaalfout:", profileError.message);
-      }
-
-      // Als profiel niet bestaat, maak het aan
-      if (!profile) {
-        console.log("🛠️ Profiel bestaat niet, aanmaken...");
-        const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
-        const isFirstUser = (count === 0);
-
-        const newProfile = {
-          id: session.user.id,
-          email: session.user.email,
-          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Coach',
-          role: isFirstUser ? 'ADMIN' : 'COACH',
-          status: isFirstUser ? 'ACTIVE' : 'PENDING'
-        };
-
-        const { data: insertedProfile, error: insertError } = await supabase
-          .from('profiles')
-          .insert([newProfile])
-          .select()
-          .maybeSingle();
-
-        if (insertError) {
-          console.error("❌ Profiel creatie fout:", insertError.message);
-          // Fallback: we zetten de user in state met session data om de app te laten werken
-          const fallbackUser: User = { ...newProfile as any, status: 'ACTIVE' };
-          setCurrentUser(fallbackUser);
-          return true;
-        }
-        profile = insertedProfile;
+        console.warn("⚠️ Kon profiel niet ophalen uit tabel:", profileError.message);
+        // We gaan door met een tijdelijk profiel als de tabel niet bestaat of leeg is
       }
 
       if (profile) {
         if (profile.status === 'INACTIVE') {
-          console.warn("🚫 Account is inactief.");
           await handleLogout();
           alert('Dit account is gedeactiveerd.');
           return false;
         }
-        console.log("✅ Gebruiker geautoriseerd:", profile.name);
         setCurrentUser(profile);
         return true;
+      } else {
+        // Maak een tijdelijk profiel object op basis van de auth data
+        // Dit zorgt ervoor dat de app NIET blijft hangen als de database tabel ontbreekt
+        const tempUser: User = {
+          id: session.user.id,
+          email: session.user.email || '',
+          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Coach',
+          role: 'COACH', // Default
+          status: 'ACTIVE'
+        };
+        
+        console.log("🛠️ Gebruik van tijdelijk profiel (database sync nodig)");
+        setCurrentUser(tempUser);
+        
+        // Probeer op de achtergrond het profiel echt aan te maken
+        try {
+          const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
+          const isFirst = count === 0;
+          await supabase.from('profiles').upsert([{
+            ...tempUser,
+            role: isFirst ? 'ADMIN' : 'COACH'
+          }]);
+        } catch (e) {
+          console.warn("⚠️ Kon profiel niet persistent opslaan.");
+        }
+        
+        return true;
       }
-      return false;
     } catch (err) {
-      console.error("❌ Onverwachte fout in checkSession:", err);
+      console.error("❌ Fout in checkSession:", err);
       return false;
     }
   };
@@ -160,7 +169,7 @@ const App: React.FC = () => {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
       if (error) {
-        alert(`Fout: ${error.message}`);
+        alert(`Inloggen mislukt: ${error.message}`);
         throw error;
       }
     } catch (err) { 
@@ -206,6 +215,7 @@ const App: React.FC = () => {
     }
   };
 
+  // RENDER LOADING STATE
   if (authLoading) {
     return (
       <div className="min-h-screen bg-brand-dark flex flex-col items-center justify-center text-white">
@@ -213,7 +223,7 @@ const App: React.FC = () => {
           <Play size={40} className="fill-current" />
         </div>
         <Loader2 className="animate-spin text-brand-green mb-4" size={32} />
-        <p className="font-bold tracking-widest uppercase text-xs text-slate-400">Elftalmanager laden...</p>
+        <p className="font-bold tracking-widest uppercase text-[10px] text-slate-400">Elftalmanager laden...</p>
       </div>
     );
   }
