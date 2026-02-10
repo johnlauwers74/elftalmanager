@@ -30,7 +30,7 @@ const App: React.FC = () => {
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
 
   useEffect(() => {
-    console.log("🚀 Elftalmanager opstarten...");
+    console.log("🚀 ELFTALMANAGER opstarten...");
     
     const init = async () => {
       await fetchData();
@@ -39,13 +39,16 @@ const App: React.FC = () => {
     };
     init();
 
+    // Luister naar auth veranderingen
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log("🔔 Auth Event:", event);
       if (session) {
+        // BELANGRIJK: Sluit de modal direct zodra we een sessie hebben
+        setIsLoginModalOpen(false);
         await checkSession();
       } else {
         setCurrentUser(null);
-        if (view !== 'SET_PASSWORD') setView('LANDING');
+        if (view !== 'SET_PASSWORD' && view !== 'LANDING') setView('LANDING');
       }
     });
 
@@ -65,8 +68,9 @@ const App: React.FC = () => {
 
   const fetchData = async () => {
     try {
-      const { data: exData } = await supabase.from('exercises').select('*').order('createdAt', { ascending: false });
-      if (exData) setExercises(exData);
+      const { data: exData, error: exError } = await supabase.from('exercises').select('*').order('createdAt', { ascending: false });
+      if (exError) console.warn("Kon oefeningen niet ophalen (bestaat de tabel 'exercises'?)");
+      else if (exData) setExercises(exData);
       
       const { data: artData } = await supabase.from('articles').select('*').order('date', { ascending: false });
       if (artData) setArticles(artData);
@@ -77,11 +81,8 @@ const App: React.FC = () => {
   };
 
   const checkSession = async () => {
-    console.log("🔍 Sessie controleren...");
     try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError) return false;
+      const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) return false;
 
       const { data: profile, error: profileError } = await supabase
@@ -91,7 +92,7 @@ const App: React.FC = () => {
         .maybeSingle();
       
       if (profileError) {
-        setIsLoginModalOpen(false);
+        console.error("Profiel fout:", profileError.message);
         return false;
       }
 
@@ -102,48 +103,43 @@ const App: React.FC = () => {
           return false;
         }
         setCurrentUser(profile);
-        setIsLoginModalOpen(false);
         if (view === 'LANDING') setView('DASHBOARD');
         return true;
       } else {
-        // AUTO REPAIR PROFIEL
+        // Auto-create profiel voor nieuwe gebruikers
         const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
-        const isFirstUser = count === 0;
-
+        const isFirst = count === 0;
         const newProfile = {
           id: session.user.id,
           email: session.user.email,
-          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Nieuwe Gebruiker',
-          role: isFirstUser ? 'ADMIN' : 'COACH',
-          status: isFirstUser ? 'ACTIVE' : 'PENDING'
+          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
+          role: isFirst ? 'ADMIN' : 'COACH',
+          status: isFirst ? 'ACTIVE' : 'PENDING'
         };
-
-        const { data: insertedProfile, error: insertError } = await supabase
-          .from('profiles')
-          .insert([newProfile])
-          .select()
-          .single();
-
-        if (!insertError && insertedProfile) {
-          setCurrentUser(insertedProfile);
-          setIsLoginModalOpen(false);
+        const { data: ins, error: insErr } = await supabase.from('profiles').insert([newProfile]).select().single();
+        if (!insErr && ins) {
+          setCurrentUser(ins);
           setView('DASHBOARD');
-          await fetchData();
           return true;
         }
-        return false;
       }
     } catch (err) {
-      setIsLoginModalOpen(false);
-      return false;
+      console.error("Sessie check crash:", err);
     }
+    return false;
   };
 
   const handleLoginAttempt = async (email: string, pass: string) => {
     try {
       const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
-      if (error) alert(`Fout: ${error.message}`);
-    } catch (err) { console.error(err); }
+      if (error) {
+        alert(`Inloggen mislukt: ${error.message}`);
+        throw error;
+      }
+    } catch (err) {
+      console.error("Login attempt error:", err);
+      throw err;
+    }
   };
 
   const handleLogout = async () => {
@@ -152,58 +148,53 @@ const App: React.FC = () => {
     setView('LANDING');
   };
 
-  const handleSetPassword = async (pass: string) => {
-    try {
-      const { error } = await supabase.auth.updateUser({ password: pass });
-      if (error) throw error;
-      await supabase.from('profiles').update({ status: 'ACTIVE' }).eq('email', activationEmail);
-      alert('Wachtwoord ingesteld!');
-      setView('LANDING');
-    } catch (err: any) { alert(err.message); throw err; }
-  };
-
-  // --- CRUD OEFENINGEN ---
   const saveExercise = async (ex: Exercise) => {
     try {
-      console.log("💾 Oefening opslaan...", ex);
+      console.log("💾 Opslaan oefening...", ex);
       
+      // Bereid data voor (verwijder metadata die niet in de kolommen moet)
+      const exerciseData = {
+        title: ex.title,
+        type: ex.type,
+        ageGroup: ex.ageGroup,
+        playersCount: ex.playersCount || '0',
+        shortDescription: ex.shortDescription,
+        description: ex.description,
+        image: ex.image || null,
+        tags: ex.tags || [],
+        createdAt: ex.createdAt || new Date().toISOString()
+      };
+
       if (!ex.id || ex.id === '') {
-        // NIEUWE OEFENING (ID verwijderen zodat Supabase deze genereert)
-        const { id, ...newExerciseData } = ex;
-        const { data, error } = await supabase
-          .from('exercises')
-          .insert([newExerciseData])
-          .select();
-
+        // NIEUW
+        const { error } = await supabase.from('exercises').insert([exerciseData]);
         if (error) throw error;
-        console.log("✅ Nieuwe oefening opgeslagen");
       } else {
-        // BESTAANDE OEFENING BIJWERKEN
-        const { error } = await supabase
-          .from('exercises')
-          .update(ex)
-          .eq('id', ex.id);
-
+        // UPDATE
+        const { error } = await supabase.from('exercises').update(exerciseData).eq('id', ex.id);
         if (error) throw error;
-        console.log("✅ Oefening bijgewerkt");
       }
 
       await fetchData();
       setView('EXERCISES');
       setEditingExercise(null);
+      alert("Oefening succesvol opgeslagen!");
     } catch (err: any) {
-      console.error("❌ Opslaan mislukt:", err);
-      alert(`Kon de oefening niet opslaan: ${err.message || 'Database fout'}`);
+      console.error("Opslaan fout:", err);
+      alert(`Fout bij opslaan: ${err.message}. \n\nCheck of de tabel 'exercises' bestaat in Supabase met de juiste kolommen.`);
     }
   };
 
   const renderView = () => {
-    if (view === 'SET_PASSWORD') return <SetPasswordView onSave={handleSetPassword} email={activationEmail} onCancel={() => setView('LANDING')} />;
+    if (view === 'SET_PASSWORD') return <SetPasswordView onSave={async (p) => { 
+      const { error } = await supabase.auth.updateUser({ password: p });
+      if (error) throw error;
+      await supabase.from('profiles').update({ status: 'ACTIVE' }).eq('email', activationEmail);
+      setView('LANDING');
+    }} email={activationEmail} onCancel={() => setView('LANDING')} />;
+    
     if (!currentUser || view === 'LANDING') return <LandingPage onLogin={() => setIsLoginModalOpen(true)} onSubscribe={(email, name) => {
-      supabase.from('profiles').insert([{ email, name, role: 'COACH', status: 'PENDING' }]).then(() => {
-        alert('Aanvraag verzonden!');
-        fetchData();
-      });
+      supabase.from('profiles').insert([{ email, name, role: 'COACH', status: 'PENDING' }]).then(() => alert('Aanvraag verzonden!'));
     }} />;
 
     switch (view) {
@@ -212,12 +203,7 @@ const App: React.FC = () => {
       case 'CREATE_EXERCISE': return <ExerciseForm onSave={saveExercise} onCancel={() => setView('EXERCISES')} />;
       case 'EDIT_EXERCISE': return <ExerciseForm onSave={saveExercise} onCancel={() => setView('EXERCISES')} initialData={editingExercise || undefined} />;
       case 'BLOG': return <BlogView articles={articles} isAdmin={currentUser.role === 'ADMIN'} onAddArticle={() => setView('CREATE_ARTICLE')} onEditArticle={(art) => { setEditingArticle(art); setView('EDIT_ARTICLE'); }} onViewArticle={(art) => { setSelectedArticle(art); setView('VIEW_ARTICLE'); }} />;
-      case 'VIEW_ARTICLE': return selectedArticle ? <ArticleDetail article={selectedArticle} onBack={() => setView('BLOG')} /> : null;
-      case 'ADMIN_USERS': return <AdminUserView users={allUsers} onApprove={async (id) => {
-        const user = allUsers.find(u => u.id === id || u.email === id);
-        await supabase.from('profiles').update({ status: 'APPROVED' }).eq('email', user?.email);
-        await fetchData();
-      }} onUpdateRole={(id, r) => supabase.from('profiles').update({ role: r }).eq('id', id).then(fetchData)} onToggleStatus={(id, s) => supabase.from('profiles').update({ status: s === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' }).eq('id', id).then(fetchData)} currentAdminId={currentUser.id} />;
+      case 'ADMIN_USERS': return <AdminUserView users={allUsers} onApprove={(id) => supabase.from('profiles').update({ status: 'APPROVED' }).eq('id', id).then(fetchData)} onUpdateRole={(id, r) => supabase.from('profiles').update({ role: r }).eq('id', id).then(fetchData)} onToggleStatus={(id, s) => supabase.from('profiles').update({ status: s === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' }).eq('id', id).then(fetchData)} currentAdminId={currentUser.id} />;
       default: return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} />;
     }
   };
