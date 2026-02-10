@@ -1,11 +1,11 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { X, Mail, Lock, Play, Loader2, ArrowRight, ShieldCheck, User as UserIcon } from 'lucide-react';
 import { Role } from '../types';
 
 interface LoginModalProps {
   onClose: () => void;
-  onLogin: (email: string, pass: string) => Promise<void> | void;
+  onLogin: (email: string, pass: string) => Promise<void>;
   onActivate: (email: string) => void;
   onDemoLogin: (role: Role) => void;
 }
@@ -20,24 +20,14 @@ const LoginModal: React.FC<LoginModalProps> = ({ onClose, onLogin, onActivate, o
     if (loading) return;
     
     setLoading(true);
-    
-    // Veiligheidstimer: Stop spinner na 5 seconden, wat er ook gebeurt
-    const timer = setTimeout(() => {
-      if (loading) {
-        console.warn("Login timer verlopen, spinner handmatig gestopt.");
-        setLoading(false);
-      }
-    }, 5000);
-    
     try {
+      // Wacht op de inlogpoging
       await onLogin(email, pass);
+      // Als onLogin slaagt, zal App.tsx de modal sluiten via onAuthStateChange.
+      // We laten loading nog even op true staan voor de UX.
     } catch (error) {
-      console.error("Modal login error:", error);
-    } finally {
-      // De App.tsx zal de modal sluiten als het lukt, 
-      // anders stoppen we hier de spinner.
-      clearTimeout(timer);
-      setTimeout(() => setLoading(false), 800);
+      // Bij een fout stoppen we de spinner zodat de gebruiker het opnieuw kan proberen
+      setLoading(false);
     }
   };
 
