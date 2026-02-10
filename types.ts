@@ -22,15 +22,6 @@ export interface Article {
   tags: string[];
 }
 
-export interface Podcast {
-  id: string;
-  title: string;
-  description: string;
-  audioUrl: string;
-  duration: string;
-  date: string;
-}
-
 export interface Exercise {
   id: string;
   title: string;
@@ -38,10 +29,20 @@ export interface Exercise {
   ageGroup: string;
   playersCount: string;
   shortDescription: string;
-  detailedInstructions: string;
+  description: string;
   image?: string;
   tags: string[];
   createdAt: string;
+}
+
+// Fix: Added missing Podcast interface definition to resolve import errors in App.tsx and views/PodcastView.tsx
+export interface Podcast {
+  id: string;
+  title: string;
+  description: string;
+  audioUrl: string;
+  duration: string;
+  date: string;
 }
 
 export type ViewState = 
