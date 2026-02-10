@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { User, Exercise, Article, Podcast, ViewState, Role, UserStatus } from './types';
 import Navbar from './components/Navbar';
 import LandingPage from './components/LandingPage';
@@ -31,47 +31,118 @@ const App: React.FC = () => {
   const [editingArticle, setEditingArticle] = useState<Article | null>(null);
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
 
+  // Data ophalen zonder de rest te blokkeren
+  const fetchData = useCallback(async () => {
+    try {
+      console.log("📊 Data ophalen op de achtergrond...");
+      
+      const { data: exData } = await supabase.from('exercises').select('*').order('createdAt', { ascending: false });
+      if (exData) setExercises(exData);
+      
+      const { data: artData } = await supabase.from('articles').select('*').order('date', { ascending: false });
+      if (artData) setArticles(artData);
+      
+      const { data: usersData } = await supabase.from('profiles').select('*');
+      if (usersData) setAllUsers(usersData);
+    } catch (err) {
+      console.warn("⚠️ Data fetch vertraagd of mislukt:", err);
+    }
+  }, []);
+
+  const checkSession = useCallback(async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session?.user) {
+        return false;
+      }
+
+      // Maak direct een lokaal profiel op basis van de Auth sessie (optimistisch)
+      const localUser: User = {
+        id: session.user.id,
+        email: session.user.email || '',
+        name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Coach',
+        role: 'COACH',
+        status: 'ACTIVE'
+      };
+      
+      setCurrentUser(localUser);
+
+      // Probeer profiel uit de database te halen voor extra info (zoals rol)
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', session.user.id)
+        .maybeSingle();
+      
+      if (profile) {
+        if (profile.status === 'INACTIVE') {
+          await supabase.auth.signOut();
+          setCurrentUser(null);
+          return false;
+        }
+        setCurrentUser(profile);
+      } else {
+        // Op de achtergrond profiel aanmaken als het niet bestaat
+        // Fix: Use second argument of .then() instead of .catch() for compatibility with PromiseLike return type
+        supabase.from('profiles').upsert([localUser]).then(
+          () => console.log("✅ Profiel gesynchroniseerd"),
+          (e) => console.error("Sync error", e)
+        );
+      }
+
+      return true;
+    } catch (err) {
+      console.error("❌ Sessie check fout:", err);
+      return false;
+    }
+  }, []);
+
   useEffect(() => {
     console.log("🚀 ELFTALMANAGER opstarten...");
     
-    const init = async () => {
-      try {
-        setAuthLoading(true);
-        const hasSession = await checkSession();
-        if (hasSession) {
-          await fetchData();
-        }
-      } catch (err) {
-        console.error("❌ Init crash:", err);
-      } finally {
+    // FAILSAFE: Forceer het einde van het laadscherm na 3 seconden
+    const failsafe = setTimeout(() => {
+      if (authLoading) {
+        console.warn("⏱️ Failsafe getriggerd: Laden duurde te lang.");
         setAuthLoading(false);
-        handleUrlParameters();
       }
+    }, 3000);
+
+    const init = async () => {
+      const hasSession = await checkSession();
+      if (hasSession) {
+        setView('DASHBOARD');
+        fetchData();
+      }
+      setAuthLoading(false);
+      clearTimeout(failsafe);
+      handleUrlParameters();
     };
 
     init();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log(`🔔 Auth Event: ${event}`);
-      
       if (session) {
         setIsLoginModalOpen(false);
         const success = await checkSession();
         if (success) {
-          await fetchData();
-          // Forceer dashboard als we nog op de landing staan
-          setView(current => (current === 'LANDING' ? 'DASHBOARD' : current));
+          fetchData();
+          if (view === 'LANDING') setView('DASHBOARD');
         }
       } else if (event === 'SIGNED_OUT') {
         setCurrentUser(null);
         setView('LANDING');
       }
-      
       setAuthLoading(false);
     });
 
-    return () => subscription.unsubscribe();
-  }, []);
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(failsafe);
+    };
+  }, [checkSession, fetchData]);
 
   const handleUrlParameters = () => {
     const params = new URLSearchParams(window.location.search);
@@ -81,87 +152,6 @@ const App: React.FC = () => {
       setView('SET_PASSWORD');
       const newUrl = window.location.origin + window.location.pathname;
       window.history.replaceState({}, document.title, newUrl);
-    }
-  };
-
-  const fetchData = async () => {
-    try {
-      console.log("📊 Gegevens ophalen...");
-      const [exRes, artRes, profRes] = await Promise.all([
-        supabase.from('exercises').select('*').order('createdAt', { ascending: false }),
-        supabase.from('articles').select('*').order('date', { ascending: false }),
-        supabase.from('profiles').select('*')
-      ]);
-
-      if (exRes.data) setExercises(exRes.data);
-      if (artRes.data) setArticles(artRes.data);
-      if (profRes.data) setAllUsers(profRes.data);
-    } catch (err) { 
-      console.error("⚠️ Fout bij ophalen data:", err); 
-    }
-  };
-
-  const checkSession = async () => {
-    try {
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError || !session?.user) {
-        return false;
-      }
-
-      console.log("👤 Sessie actief voor:", session.user.email);
-
-      // Probeer profiel op te halen met een timeout/snelle afhandeling
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .maybeSingle();
-      
-      if (profileError) {
-        console.warn("⚠️ Kon profiel niet ophalen uit tabel:", profileError.message);
-        // We gaan door met een tijdelijk profiel als de tabel niet bestaat of leeg is
-      }
-
-      if (profile) {
-        if (profile.status === 'INACTIVE') {
-          await handleLogout();
-          alert('Dit account is gedeactiveerd.');
-          return false;
-        }
-        setCurrentUser(profile);
-        return true;
-      } else {
-        // Maak een tijdelijk profiel object op basis van de auth data
-        // Dit zorgt ervoor dat de app NIET blijft hangen als de database tabel ontbreekt
-        const tempUser: User = {
-          id: session.user.id,
-          email: session.user.email || '',
-          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Coach',
-          role: 'COACH', // Default
-          status: 'ACTIVE'
-        };
-        
-        console.log("🛠️ Gebruik van tijdelijk profiel (database sync nodig)");
-        setCurrentUser(tempUser);
-        
-        // Probeer op de achtergrond het profiel echt aan te maken
-        try {
-          const { count } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
-          const isFirst = count === 0;
-          await supabase.from('profiles').upsert([{
-            ...tempUser,
-            role: isFirst ? 'ADMIN' : 'COACH'
-          }]);
-        } catch (e) {
-          console.warn("⚠️ Kon profiel niet persistent opslaan.");
-        }
-        
-        return true;
-      }
-    } catch (err) {
-      console.error("❌ Fout in checkSession:", err);
-      return false;
     }
   };
 
@@ -176,12 +166,6 @@ const App: React.FC = () => {
       console.error(err);
       throw err;
     }
-  };
-
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setCurrentUser(null);
-    setView('LANDING');
   };
 
   const saveExercise = async (ex: Exercise) => {
@@ -215,7 +199,6 @@ const App: React.FC = () => {
     }
   };
 
-  // RENDER LOADING STATE
   if (authLoading) {
     return (
       <div className="min-h-screen bg-brand-dark flex flex-col items-center justify-center text-white">
@@ -254,7 +237,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
-      {currentUser && view !== 'LANDING' && <Navbar userRole={currentUser.role} currentView={view} setView={setView} onLogout={handleLogout} />}
+      {currentUser && view !== 'LANDING' && <Navbar userRole={currentUser.role} currentView={view} setView={setView} onLogout={() => supabase.auth.signOut()} />}
       <main className="flex-grow">{renderView()}</main>
       {isLoginModalOpen && <LoginModal onClose={() => setIsLoginModalOpen(false)} onLogin={handleLoginAttempt} onActivate={setActivationEmail} onDemoLogin={(role) => {
           const mockUser: User = { id: `demo-${role}`, name: `Demo ${role}`, email: `${role.toLowerCase()}@demo.be`, role: role, status: 'ACTIVE' };
