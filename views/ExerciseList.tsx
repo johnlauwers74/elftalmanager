@@ -75,7 +75,6 @@ const ExerciseList: React.FC<ExerciseListProps> = ({ exercises, onAdd, onEdit, i
           </div>
         </div>
         
-        {/* We geven dit element een ID voor de PDF service */}
         <div id="exercise-print-area" className="bg-white p-4">
           <header className="mb-6 border-b-4 border-brand-green pb-4">
             <h1 className="text-4xl font-black mb-1 text-slate-900 leading-tight uppercase tracking-tight">{selectedExercise.title}</h1>
@@ -110,10 +109,10 @@ const ExerciseList: React.FC<ExerciseListProps> = ({ exercises, onAdd, onEdit, i
 
           <div className="mb-10 text-left">
             <h2 className="text-xl font-black mb-4 text-brand-dark uppercase tracking-tight border-l-4 border-brand-green pl-4">
-               Stapsgewijze Instructies
+               Omschrijving (Instructies)
             </h2>
             <div className="text-slate-700 leading-relaxed whitespace-pre-wrap bg-slate-50/50 p-6 rounded-2xl border border-slate-100">
-              {selectedExercise.detailedInstructions}
+              {selectedExercise.description}
             </div>
           </div>
 
