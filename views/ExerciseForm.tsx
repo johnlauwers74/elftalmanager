@@ -44,11 +44,14 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
     const file = e.target.files?.[0];
     if (file) {
       setUploading(true);
-      const url = await uploadFile('oefeningen', file);
-      if (url) {
-        setFormData(prev => ({ ...prev, image: url }));
+      try {
+        const url = await uploadFile('oefeningen', file);
+        if (url) {
+          setFormData(prev => ({ ...prev, image: url }));
+        }
+      } finally {
+        setUploading(false);
       }
-      setUploading(false);
     }
   };
 
@@ -58,16 +61,19 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
       return;
     }
     setLoading(true);
-    const suggestion = await generateExerciseSuggestions(formData.title);
-    if (suggestion) {
-      setFormData(prev => ({ ...prev, ...suggestion }));
+    try {
+      const suggestion = await generateExerciseSuggestions(formData.title);
+      if (suggestion) {
+        setFormData(prev => ({ ...prev, ...suggestion }));
+      }
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const addTag = () => {
-    if (tagInput && !formData.tags?.includes(tagInput)) {
-      setFormData(prev => ({ ...prev, tags: [...(prev.tags || []), tagInput] }));
+    if (tagInput.trim() && !formData.tags?.includes(tagInput.trim())) {
+      setFormData(prev => ({ ...prev, tags: [...(prev.tags || []), tagInput.trim()] }));
       setTagInput('');
     }
   };
@@ -81,19 +87,27 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validatie
+    if (!formData.title || !formData.shortDescription || !formData.description) {
+      alert('Vul alle verplichte velden in.');
+      return;
+    }
+
     const ex: Exercise = {
       ...formData as Exercise,
-      id: initialData?.id || '',
+      id: initialData?.id || '', // Leeg laten bij nieuwe oefening, wordt afgehandeld in App.tsx
       createdAt: initialData?.createdAt || new Date().toISOString()
     };
+    
     onSave(ex);
   };
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-10">
       <div className="bg-white rounded-3xl shadow-xl p-8 md:p-12 border border-slate-100">
-        <div className="flex justify-between items-center mb-8">
-          <h2 className="text-3xl font-bold text-slate-900">
+        <div className="flex justify-between items-center mb-8 text-slate-900">
+          <h2 className="text-3xl font-bold">
             {initialData ? 'Oefening Bewerken' : 'Nieuwe Oefening'}
           </h2>
           <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 transition-colors"><X size={24} /></button>
@@ -102,13 +116,13 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid md:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <label className="text-sm font-bold text-slate-700">Titel / Thema</label>
-              <div className="flex gap-2">
+              <label className="text-sm font-bold text-slate-700">Titel / Thema *</label>
+              <div className="flex gap-2 text-slate-900">
                 <input 
                   type="text" 
                   required
                   placeholder="Bijv. Positiespel 4v4"
-                  className="flex-grow border border-slate-200 bg-white text-slate-900 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-brand-green transition-all"
+                  className="flex-grow border border-slate-200 bg-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-brand-green transition-all"
                   value={formData.title}
                   onChange={(e) => setFormData(prev => ({ ...prev, title: e.target.value }))}
                 />
@@ -118,7 +132,6 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
                     onClick={handleAISuggest}
                     disabled={loading}
                     className="bg-emerald-50 text-brand-green px-4 py-3 rounded-xl hover:bg-emerald-100 transition-colors flex items-center gap-2 disabled:opacity-50 shadow-sm"
-                    title="Genereer inhoud met AI"
                   >
                     {loading ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}
                     AI
@@ -162,7 +175,7 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-bold text-slate-700">Korte omschrijving</label>
+            <label className="text-sm font-bold text-slate-700">Korte omschrijving *</label>
             <input 
               type="text" 
               required
@@ -174,7 +187,7 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-bold text-slate-700">Omschrijving (Instructies)</label>
+            <label className="text-sm font-bold text-slate-700">Omschrijving (Instructies) *</label>
             <textarea 
               rows={6}
               required
@@ -183,6 +196,36 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
               value={formData.description}
               onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
             />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-bold text-slate-700">Locatie tekening (Veldopstelling)</label>
+            <div className="flex flex-col md:flex-row items-center gap-6 p-6 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+              <label className="cursor-pointer flex flex-col items-center justify-center text-slate-500 hover:text-brand-green transition-colors">
+                {uploading ? (
+                  <Loader2 className="animate-spin text-brand-green" size={40} />
+                ) : (
+                  <>
+                    <Upload size={40} className="mb-2" />
+                    <span className="text-sm font-bold">Tekening uploaden</span>
+                  </>
+                )}
+                <input type="file" className="hidden" accept="image/*" onChange={handleFileChange} disabled={uploading} />
+              </label>
+              
+              {formData.image && (
+                <div className="relative w-full md:w-48 h-32 rounded-xl overflow-hidden border border-slate-200 shadow-md bg-white">
+                  <img src={formData.image} className="w-full h-full object-contain" alt="Preview" />
+                  <button 
+                    type="button" 
+                    onClick={() => setFormData(prev => ({ ...prev, image: '' }))}
+                    className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-lg hover:bg-red-600 transition-colors"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -211,36 +254,6 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
                   <button type="button" onClick={() => removeTag(tag)} className="hover:text-red-500"><X size={12} /></button>
                 </span>
               ))}
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-sm font-bold text-slate-700">Locatie tekening (Diagram)</label>
-            <div className="flex flex-col md:flex-row items-center gap-6 p-6 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
-              <label className="cursor-pointer flex flex-col items-center justify-center text-slate-500 hover:text-brand-green transition-colors">
-                {uploading ? (
-                  <Loader2 className="animate-spin text-brand-green" size={40} />
-                ) : (
-                  <>
-                    <Upload size={40} className="mb-2" />
-                    <span className="text-sm font-bold">Bestand uploaden naar cloud</span>
-                  </>
-                )}
-                <input type="file" className="hidden" accept="image/*" onChange={handleFileChange} disabled={uploading} />
-              </label>
-              
-              {formData.image && (
-                <div className="relative w-full md:w-48 h-32 rounded-xl overflow-hidden border border-slate-200 shadow-md bg-white">
-                  <img src={formData.image} className="w-full h-full object-contain" alt="Preview" />
-                  <button 
-                    type="button" 
-                    onClick={() => setFormData(prev => ({ ...prev, image: '' }))}
-                    className="absolute top-2 right-2 bg-red-500 text-white p-1.5 rounded-full shadow-lg hover:bg-red-600 transition-colors"
-                  >
-                    <X size={14} />
-                  </button>
-                </div>
-              )}
             </div>
           </div>
 
