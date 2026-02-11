@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { User, Exercise, Article, Podcast, ViewState, Role, UserStatus } from './types';
+import React, { useState, useEffect, useCallback } from 'react';
+import { User, Exercise, Article, Podcast, ViewState, Role } from './types';
 import Navbar from './components/Navbar';
 import LandingPage from './components/LandingPage';
 import ExerciseList from './views/ExerciseList';
@@ -17,206 +17,137 @@ import { supabase } from './lib/supabase';
 import { Loader2, Play } from 'lucide-react';
 
 const App: React.FC = () => {
+  // 1. Core State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [view, setView] = useState<ViewState>('LANDING');
   const [authLoading, setAuthLoading] = useState(true);
+  
+  // 2. Data State
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [podcasts, setPodcasts] = useState<Podcast[]>([]);
-  
   const [allUsers, setAllUsers] = useState<User[]>([]);
+
+  // 3. UI State
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [activationEmail, setActivationEmail] = useState('');
   const [editingExercise, setEditingExercise] = useState<Exercise | null>(null);
   const [editingArticle, setEditingArticle] = useState<Article | null>(null);
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
 
-  // Router effect: Forceer dashboard als we ingelogd zijn maar nog op landing staan
-  useEffect(() => {
-    if (currentUser && view === 'LANDING') {
-      console.log("🔄 Router: Gebruiker gedetecteerd, switch naar DASHBOARD");
-      setView('DASHBOARD');
-    }
-  }, [currentUser, view]);
-
-  // Data ophalen op de achtergrond
-  const fetchData = useCallback(async () => {
+  // Helper om data op te halen (stille achtergrondtaak)
+  const refreshAppData = useCallback(async () => {
     try {
-      const { data: exData } = await supabase.from('exercises').select('*').order('createdAt', { ascending: false });
-      if (exData) setExercises(exData);
+      const [exRes, artRes, profRes] = await Promise.all([
+        supabase.from('exercises').select('*').order('createdAt', { ascending: false }),
+        supabase.from('articles').select('*').order('date', { ascending: false }),
+        supabase.from('profiles').select('*')
+      ]);
       
-      const { data: artData } = await supabase.from('articles').select('*').order('date', { ascending: false });
-      if (artData) setArticles(artData);
-      
-      const { data: usersData } = await supabase.from('profiles').select('*');
-      if (usersData) setAllUsers(usersData);
+      if (exRes.data) setExercises(exRes.data);
+      if (artRes.data) setArticles(artRes.data);
+      if (profRes.data) setAllUsers(profRes.data);
     } catch (err) {
-      console.warn("⚠️ Data fetch issue:", err);
+      console.warn("Data fetch vertraagd, geen blokkade.");
     }
   }, []);
 
-  const checkSession = useCallback(async () => {
-    try {
+  // Centrale functie om de gebruiker te zetten en naar dashboard te gaan
+  const enterDashboard = useCallback((user: User) => {
+    setCurrentUser(user);
+    setView('DASHBOARD');
+    setIsLoginModalOpen(false);
+    setAuthLoading(false);
+    refreshAppData();
+  }, [refreshAppData]);
+
+  // Initialisatie & Auth Listener
+  useEffect(() => {
+    // Harde failsafe voor het laadscherm
+    const failsafe = setTimeout(() => setAuthLoading(false), 2000);
+
+    const checkInitialSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      
-      if (!session?.user) {
-        setCurrentUser(null);
-        return false;
-      }
-
-      // Maak vast een lokaal profiel aan zodat de app door kan
-      const localUser: User = {
-        id: session.user.id,
-        email: session.user.email || '',
-        name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Coach',
-        role: 'COACH',
-        status: 'ACTIVE'
-      };
-
-      // Zet de gebruiker direct (optimistisch)
-      setCurrentUser(localUser);
-
-      // Probeer profiel uit DB te halen voor de juiste Rol
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', session.user.id)
-        .maybeSingle();
-      
-      if (profile) {
-        if (profile.status === 'INACTIVE') {
-          await supabase.auth.signOut();
-          setCurrentUser(null);
-          return false;
-        }
-        setCurrentUser(profile);
+      if (session?.user) {
+        const user: User = {
+          id: session.user.id,
+          email: session.user.email || '',
+          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Coach',
+          role: 'COACH',
+          status: 'ACTIVE'
+        };
+        enterDashboard(user);
       } else {
-        // Als profiel niet bestaat, maak het aan op de achtergrond
-        supabase.from('profiles').upsert([localUser]).then(
-          () => console.log("✅ Profiel gesync"),
-          (e) => console.error("Sync error", e)
-        );
-      }
-      return true;
-    } catch (err) {
-      console.error("❌ checkSession crash:", err);
-      return false;
-    }
-  }, []);
-
-  useEffect(() => {
-    // 1. FAILSAFE: Stop altijd met laden na 3 seconden, wat er ook gebeurt
-    const timer = setTimeout(() => {
-      if (authLoading) {
-        console.warn("⏱️ Failsafe getriggerd: Laden duurde te lang.");
         setAuthLoading(false);
-      }
-    }, 3000);
-
-    // 2. Initiele check bij opstarten
-    const init = async () => {
-      try {
-        const hasSession = await checkSession();
-        if (hasSession) {
-          fetchData();
-        }
-      } finally {
-        setAuthLoading(false);
-        clearTimeout(timer);
-        handleUrlParameters();
       }
     };
-    init();
 
-    // 3. Luister naar auth veranderingen
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    checkInitialSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       console.log(`🔔 Auth Event: ${event}`);
-      if (session) {
-        const hasProfile = await checkSession();
-        if (hasProfile) {
-          fetchData();
-        }
-        setAuthLoading(false); // Zorg dat we stoppen met laden na een sign-in event
+      if (event === 'SIGNED_IN' && session?.user) {
+        const user: User = {
+          id: session.user.id,
+          email: session.user.email || '',
+          name: session.user.user_metadata?.full_name || session.user.email?.split('@')[0] || 'Coach',
+          role: 'COACH',
+          status: 'ACTIVE'
+        };
+        enterDashboard(user);
       } else if (event === 'SIGNED_OUT') {
         setCurrentUser(null);
         setView('LANDING');
-        setAuthLoading(false);
       }
     });
 
     return () => {
       subscription.unsubscribe();
-      clearTimeout(timer);
+      clearTimeout(failsafe);
     };
-  }, [checkSession, fetchData]);
+  }, [enterDashboard]);
 
-  const handleUrlParameters = () => {
-    const params = new URLSearchParams(window.location.search);
-    const activateEmail = params.get('activate');
-    if (activateEmail) {
-      setActivationEmail(activateEmail);
-      setView('SET_PASSWORD');
-      const newUrl = window.location.origin + window.location.pathname;
-      window.history.replaceState({}, document.title, newUrl);
-    }
-  };
-
+  // Handle Login Poging
   const handleLoginAttempt = async (email: string, pass: string) => {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
       if (error) throw error;
       
-      if (data.session) {
-        await checkSession();
-        setIsLoginModalOpen(false);
-        setView('DASHBOARD'); 
-        fetchData();
+      if (data.session?.user) {
+        const user: User = {
+          id: data.session.user.id,
+          email: data.session.user.email || '',
+          name: data.session.user.user_metadata?.full_name || 'Coach',
+          role: 'COACH',
+          status: 'ACTIVE'
+        };
+        enterDashboard(user);
       }
     } catch (err: any) { 
-      alert(`Inloggen mislukt: ${err.message}`);
+      alert(`Fout: ${err.message}`);
       throw err;
     }
   };
 
   const saveExercise = async (ex: Exercise) => {
     try {
-      const exerciseData = {
-        title: ex.title,
-        type: ex.type,
-        ageGroup: ex.ageGroup,
-        playersCount: ex.playersCount || '0',
-        shortDescription: ex.shortDescription,
-        description: ex.description,
-        image: ex.image || null,
-        tags: ex.tags || [],
-        createdAt: ex.createdAt || new Date().toISOString()
-      };
-
-      if (!ex.id || ex.id === '') {
-        const { error } = await supabase.from('exercises').insert([exerciseData]);
-        if (error) throw error;
-      } else {
-        const { error } = await supabase.from('exercises').update(exerciseData).eq('id', ex.id);
-        if (error) throw error;
-      }
-
-      await fetchData();
+      const { error } = ex.id 
+        ? await supabase.from('exercises').update(ex).eq('id', ex.id)
+        : await supabase.from('exercises').insert([ex]);
+      if (error) throw error;
+      refreshAppData();
       setView('EXERCISES');
       setEditingExercise(null);
-      alert("Oefening opgeslagen!");
     } catch (err: any) {
-      alert(`Fout bij opslaan: ${err.message}`);
+      alert(err.message);
     }
   };
 
   if (authLoading) {
     return (
       <div className="min-h-screen bg-brand-dark flex flex-col items-center justify-center text-white">
-        <div className="w-20 h-20 bg-brand-green rounded-2xl flex items-center justify-center mb-6 shadow-2xl animate-pulse">
-          <Play size={40} className="fill-current" />
-        </div>
-        <Loader2 className="animate-spin text-brand-green mb-4" size={32} />
-        <p className="font-bold tracking-widest uppercase text-[10px] text-slate-400">Elftalmanager laden...</p>
+        <Loader2 className="animate-spin text-brand-green mb-4" size={48} />
+        <p className="font-bold tracking-widest uppercase text-xs text-slate-400">Elftalmanager laden...</p>
       </div>
     );
   }
@@ -224,35 +155,29 @@ const App: React.FC = () => {
   const renderView = () => {
     if (view === 'SET_PASSWORD') return <SetPasswordView onSave={async (p) => {
       await supabase.auth.updateUser({ password: p });
-      await supabase.from('profiles').update({ status: 'ACTIVE' }).eq('email', activationEmail);
       setView('LANDING');
     }} email={activationEmail} onCancel={() => setView('LANDING')} />;
     
-    if (!currentUser) {
-      return <LandingPage 
-        onLogin={() => setIsLoginModalOpen(true)} 
-        onSubscribe={(email, name) => {
-          supabase.from('profiles').insert([{ email, name, role: 'COACH', status: 'PENDING' }]).then(() => alert('Aanvraag verzonden!'));
-        }} 
-      />;
+    if (!currentUser || view === 'LANDING') {
+      return <LandingPage onLogin={() => setIsLoginModalOpen(true)} onSubscribe={() => {}} />;
     }
 
     switch (view) {
       case 'DASHBOARD': return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} />;
-      case 'EXERCISES': return <ExerciseList exercises={exercises} onAdd={() => { setEditingExercise(null); setView('CREATE_EXERCISE'); }} onEdit={(ex) => { setEditingExercise(ex); setView('EDIT_EXERCISE'); }} isAdmin={currentUser.role === 'ADMIN'} />;
+      case 'EXERCISES': return <ExerciseList exercises={exercises} onAdd={() => setView('CREATE_EXERCISE')} onEdit={(ex) => { setEditingExercise(ex); setView('EDIT_EXERCISE'); }} isAdmin={currentUser.role === 'ADMIN'} />;
       case 'CREATE_EXERCISE': return <ExerciseForm onSave={saveExercise} onCancel={() => setView('EXERCISES')} />;
       case 'EDIT_EXERCISE': return <ExerciseForm onSave={saveExercise} onCancel={() => setView('EXERCISES')} initialData={editingExercise || undefined} />;
       case 'BLOG': return <BlogView articles={articles} isAdmin={currentUser.role === 'ADMIN'} onAddArticle={() => setView('CREATE_ARTICLE')} onEditArticle={(art) => { setEditingArticle(art); setView('EDIT_ARTICLE'); }} onViewArticle={(art) => { setSelectedArticle(art); setView('VIEW_ARTICLE'); }} />;
       case 'VIEW_ARTICLE': return selectedArticle ? <ArticleDetail article={selectedArticle} onBack={() => setView('BLOG')} /> : null;
-      case 'ADMIN_USERS': return <AdminUserView users={allUsers} onApprove={(id) => supabase.from('profiles').update({ status: 'APPROVED' }).eq('id', id).then(fetchData)} onUpdateRole={(id, r) => supabase.from('profiles').update({ role: r }).eq('id', id).then(fetchData)} onToggleStatus={(id, s) => supabase.from('profiles').update({ status: s === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' }).eq('id', id).then(fetchData)} currentAdminId={currentUser.id} />;
+      case 'ADMIN_USERS': return <AdminUserView users={allUsers} onApprove={() => {}} onUpdateRole={() => {}} onToggleStatus={() => {}} currentAdminId={currentUser.id} />;
       case 'PODCASTS': return <PodcastView podcasts={podcasts} isAdmin={currentUser.role === 'ADMIN'} onAddPodcast={() => {}} />;
       default: return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} />;
     }
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
-      {currentUser && (
+    <div className="min-h-screen flex flex-col bg-slate-50">
+      {currentUser && view !== 'LANDING' && (
         <Navbar 
           userRole={currentUser.role} 
           currentView={view} 
@@ -272,10 +197,8 @@ const App: React.FC = () => {
           onLogin={handleLoginAttempt} 
           onActivate={setActivationEmail} 
           onDemoLogin={(role) => {
-            const mockUser: User = { id: `demo-${role}`, name: `Demo ${role}`, email: `${role.toLowerCase()}@demo.be`, role: role, status: 'ACTIVE' };
-            setCurrentUser(mockUser); 
-            setIsLoginModalOpen(false); 
-            setView('DASHBOARD');
+            const mock: User = { id: 'demo', email: 'demo@pro.be', name: 'Demo Coach', role: role, status: 'ACTIVE' };
+            enterDashboard(mock);
           }} 
         />
       )}
