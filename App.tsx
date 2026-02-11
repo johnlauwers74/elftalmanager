@@ -64,6 +64,7 @@ const App: React.FC = () => {
         return false;
       }
 
+      // Maak vast een lokaal profiel aan zodat de app door kan
       const localUser: User = {
         id: session.user.id,
         email: session.user.email || '',
@@ -72,6 +73,10 @@ const App: React.FC = () => {
         status: 'ACTIVE'
       };
 
+      // Zet de gebruiker direct (optimistisch)
+      setCurrentUser(localUser);
+
+      // Probeer profiel uit DB te halen voor de juiste Rol
       const { data: profile } = await supabase
         .from('profiles')
         .select('*')
@@ -86,7 +91,7 @@ const App: React.FC = () => {
         }
         setCurrentUser(profile);
       } else {
-        setCurrentUser(localUser);
+        // Als profiel niet bestaat, maak het aan op de achtergrond
         supabase.from('profiles').upsert([localUser]).then(
           () => console.log("✅ Profiel gesync"),
           (e) => console.error("Sync error", e)
@@ -100,15 +105,30 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    // Initiele check bij opstarten
+    // 1. FAILSAFE: Stop altijd met laden na 3 seconden, wat er ook gebeurt
+    const timer = setTimeout(() => {
+      if (authLoading) {
+        console.warn("⏱️ Failsafe getriggerd: Laden duurde te lang.");
+        setAuthLoading(false);
+      }
+    }, 3000);
+
+    // 2. Initiele check bij opstarten
     const init = async () => {
-      await checkSession();
-      setAuthLoading(false);
-      handleUrlParameters();
+      try {
+        const hasSession = await checkSession();
+        if (hasSession) {
+          fetchData();
+        }
+      } finally {
+        setAuthLoading(false);
+        clearTimeout(timer);
+        handleUrlParameters();
+      }
     };
     init();
 
-    // Luister naar auth veranderingen
+    // 3. Luister naar auth veranderingen
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log(`🔔 Auth Event: ${event}`);
       if (session) {
@@ -116,13 +136,18 @@ const App: React.FC = () => {
         if (hasProfile) {
           fetchData();
         }
+        setAuthLoading(false); // Zorg dat we stoppen met laden na een sign-in event
       } else if (event === 'SIGNED_OUT') {
         setCurrentUser(null);
         setView('LANDING');
+        setAuthLoading(false);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timer);
+    };
   }, [checkSession, fetchData]);
 
   const handleUrlParameters = () => {
@@ -144,7 +169,7 @@ const App: React.FC = () => {
       if (data.session) {
         await checkSession();
         setIsLoginModalOpen(false);
-        setView('DASHBOARD'); // Directe navigatie
+        setView('DASHBOARD'); 
         fetchData();
       }
     } catch (err: any) { 
@@ -203,7 +228,6 @@ const App: React.FC = () => {
       setView('LANDING');
     }} email={activationEmail} onCancel={() => setView('LANDING')} />;
     
-    // Alleen landing tonen als er GEEN gebruiker is
     if (!currentUser) {
       return <LandingPage 
         onLogin={() => setIsLoginModalOpen(true)} 
@@ -213,7 +237,6 @@ const App: React.FC = () => {
       />;
     }
 
-    // Als er een gebruiker is, handel de overige views af
     switch (view) {
       case 'DASHBOARD': return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} />;
       case 'EXERCISES': return <ExerciseList exercises={exercises} onAdd={() => { setEditingExercise(null); setView('CREATE_EXERCISE'); }} onEdit={(ex) => { setEditingExercise(ex); setView('EDIT_EXERCISE'); }} isAdmin={currentUser.role === 'ADMIN'} />;
@@ -223,7 +246,6 @@ const App: React.FC = () => {
       case 'VIEW_ARTICLE': return selectedArticle ? <ArticleDetail article={selectedArticle} onBack={() => setView('BLOG')} /> : null;
       case 'ADMIN_USERS': return <AdminUserView users={allUsers} onApprove={(id) => supabase.from('profiles').update({ status: 'APPROVED' }).eq('id', id).then(fetchData)} onUpdateRole={(id, r) => supabase.from('profiles').update({ role: r }).eq('id', id).then(fetchData)} onToggleStatus={(id, s) => supabase.from('profiles').update({ status: s === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE' }).eq('id', id).then(fetchData)} currentAdminId={currentUser.id} />;
       case 'PODCASTS': return <PodcastView podcasts={podcasts} isAdmin={currentUser.role === 'ADMIN'} onAddPodcast={() => {}} />;
-      case 'LANDING': return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} />; // Failsafe
       default: return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} />;
     }
   };
