@@ -110,6 +110,7 @@ const App: React.FC = () => {
     }, 3000);
 
     const init = async () => {
+      console.log("check session");
       const hasSession = await checkSession();
       if (hasSession) {
         console.log("has session");
