@@ -32,10 +32,9 @@ export interface Exercise {
   description: string;
   image?: string;
   tags: string[];
-  createdAt: string;
+  created_at: string;
 }
 
-// Fix: Added missing Podcast interface definition to resolve import errors in App.tsx and views/PodcastView.tsx
 export interface Podcast {
   id: string;
   title: string;
