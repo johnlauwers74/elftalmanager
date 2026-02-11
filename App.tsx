@@ -112,6 +112,7 @@ const App: React.FC = () => {
     const init = async () => {
       const hasSession = await checkSession();
       if (hasSession) {
+        console.log("has session");
         setView('DASHBOARD');
         fetchData();
       }
