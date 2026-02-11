@@ -14,32 +14,28 @@ import Dashboard from './views/Dashboard';
 import LoginModal from './components/LoginModal';
 import SetPasswordView from './views/SetPasswordView';
 import { supabase } from './lib/supabase';
-import { Loader2, Play } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 const App: React.FC = () => {
-  // 1. Core State
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [view, setView] = useState<ViewState>('LANDING');
   const [authLoading, setAuthLoading] = useState(true);
   
-  // 2. Data State
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [podcasts, setPodcasts] = useState<Podcast[]>([]);
   const [allUsers, setAllUsers] = useState<User[]>([]);
 
-  // 3. UI State
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [activationEmail, setActivationEmail] = useState('');
   const [editingExercise, setEditingExercise] = useState<Exercise | null>(null);
   const [editingArticle, setEditingArticle] = useState<Article | null>(null);
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
 
-  // Helper om data op te halen (stille achtergrondtaak)
   const refreshAppData = useCallback(async () => {
     try {
       const [exRes, artRes, profRes] = await Promise.all([
-        supabase.from('exercises').select('*').order('createdAt', { ascending: false }),
+        supabase.from('exercises').select('*').order('created_at', { ascending: false }),
         supabase.from('articles').select('*').order('date', { ascending: false }),
         supabase.from('profiles').select('*')
       ]);
@@ -48,11 +44,10 @@ const App: React.FC = () => {
       if (artRes.data) setArticles(artRes.data);
       if (profRes.data) setAllUsers(profRes.data);
     } catch (err) {
-      console.warn("Data fetch vertraagd, geen blokkade.");
+      console.warn("Data fetch issues:", err);
     }
   }, []);
 
-  // Centrale functie om de gebruiker te zetten en naar dashboard te gaan
   const enterDashboard = useCallback((user: User) => {
     setCurrentUser(user);
     setView('DASHBOARD');
@@ -61,9 +56,7 @@ const App: React.FC = () => {
     refreshAppData();
   }, [refreshAppData]);
 
-  // Initialisatie & Auth Listener
   useEffect(() => {
-    // Harde failsafe voor het laadscherm
     const failsafe = setTimeout(() => setAuthLoading(false), 2000);
 
     const checkInitialSession = async () => {
@@ -85,7 +78,6 @@ const App: React.FC = () => {
     checkInitialSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log(`🔔 Auth Event: ${event}`);
       if (event === 'SIGNED_IN' && session?.user) {
         const user: User = {
           id: session.user.id,
@@ -107,7 +99,6 @@ const App: React.FC = () => {
     };
   }, [enterDashboard]);
 
-  // Handle Login Poging
   const handleLoginAttempt = async (email: string, pass: string) => {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
@@ -131,9 +122,12 @@ const App: React.FC = () => {
 
   const saveExercise = async (ex: Exercise) => {
     try {
-      const { error } = ex.id 
-        ? await supabase.from('exercises').update(ex).eq('id', ex.id)
-        : await supabase.from('exercises').insert([ex]);
+      // Zorg dat we 'created_at' gebruiken in plaats van 'createdAt'
+      const { id, ...dataToSave } = ex;
+      const { error } = id && id !== ''
+        ? await supabase.from('exercises').update(dataToSave).eq('id', id)
+        : await supabase.from('exercises').insert([dataToSave]);
+      
       if (error) throw error;
       refreshAppData();
       setView('EXERCISES');
