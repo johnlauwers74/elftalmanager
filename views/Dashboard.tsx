@@ -5,13 +5,14 @@ import { Play, BookOpen, Users, Calendar, ArrowRight } from 'lucide-react';
 interface DashboardProps {
   exercisesCount: number;
   articlesCount: number;
+  coachName: string;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ exercisesCount, articlesCount }) => {
+const Dashboard: React.FC<DashboardProps> = ({ exercisesCount, articlesCount, coachName }) => {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
       <div className="mb-12">
-        <h1 className="text-4xl font-black text-brand-dark tracking-tight">Welkom terug, Coach!</h1>
+        <h1 className="text-4xl font-black text-brand-dark tracking-tight">Welkom terug, {coachName}!</h1>
         <p className="text-slate-500 mt-2 text-lg font-medium">Beheer je team en blijf jezelf ontwikkelen.</p>
       </div>
 
