@@ -52,7 +52,7 @@ const App: React.FC = () => {
   const checkSession = useCallback(async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      
+      console.log(session);
       if (!session?.user) {
         return false;
       }
