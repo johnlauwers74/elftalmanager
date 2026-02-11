@@ -163,7 +163,7 @@ const App: React.FC = () => {
     }
 
     switch (view) {
-      case 'DASHBOARD': return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} />;
+      case 'DASHBOARD': return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} coachName={currentUser.name} />;
       case 'EXERCISES': return <ExerciseList exercises={exercises} onAdd={() => setView('CREATE_EXERCISE')} onEdit={(ex) => { setEditingExercise(ex); setView('EDIT_EXERCISE'); }} isAdmin={currentUser.role === 'ADMIN'} />;
       case 'CREATE_EXERCISE': return <ExerciseForm onSave={saveExercise} onCancel={() => setView('EXERCISES')} />;
       case 'EDIT_EXERCISE': return <ExerciseForm onSave={saveExercise} onCancel={() => setView('EXERCISES')} initialData={editingExercise || undefined} />;
@@ -171,7 +171,7 @@ const App: React.FC = () => {
       case 'VIEW_ARTICLE': return selectedArticle ? <ArticleDetail article={selectedArticle} onBack={() => setView('BLOG')} /> : null;
       case 'ADMIN_USERS': return <AdminUserView users={allUsers} onApprove={() => {}} onUpdateRole={() => {}} onToggleStatus={() => {}} currentAdminId={currentUser.id} />;
       case 'PODCASTS': return <PodcastView podcasts={podcasts} isAdmin={currentUser.role === 'ADMIN'} onAddPodcast={() => {}} />;
-      default: return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} />;
+      default: return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} coachName={currentUser.name} />;
     }
   };
 
