@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Exercise } from '../types';
-import { Save, X, Sparkles, Loader2, Upload, Plus } from 'lucide-react';
+import { Save, X, Sparkles, Loader2, Upload, Plus, Tag } from 'lucide-react';
 import { generateExerciseSuggestions } from '../services/geminiService';
 import { uploadFile } from '../services/storageService';
 
@@ -72,9 +72,17 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
   };
 
   const addTag = () => {
-    if (tagInput.trim() && !formData.tags?.includes(tagInput.trim())) {
-      setFormData(prev => ({ ...prev, tags: [...(prev.tags || []), tagInput.trim()] }));
+    const cleanTag = tagInput.trim().toLowerCase();
+    if (cleanTag && !formData.tags?.includes(cleanTag)) {
+      setFormData(prev => ({ ...prev, tags: [...(prev.tags || []), cleanTag] }));
       setTagInput('');
+    }
+  };
+
+  const handleTagKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addTag();
     }
   };
 
@@ -131,6 +139,7 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
                     onClick={handleAISuggest}
                     disabled={loading}
                     className="bg-emerald-50 text-brand-green px-4 py-3 rounded-xl hover:bg-emerald-100 transition-colors flex items-center gap-2 disabled:opacity-50"
+                    title="Genereer inhoud met AI"
                   >
                     {loading ? <Loader2 className="animate-spin" size={20} /> : <Sparkles size={20} />}
                     AI
@@ -177,6 +186,7 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
             <input 
               type="text" 
               required
+              placeholder="Wat is het hoofddoel van deze oefening?"
               className="w-full border border-slate-200 bg-white text-slate-900 rounded-xl px-4 py-3 outline-none"
               value={formData.shortDescription}
               onChange={(e) => setFormData(prev => ({ ...prev, shortDescription: e.target.value }))}
@@ -184,33 +194,105 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-bold text-slate-700">Omschrijving *</label>
+            <label className="text-sm font-bold text-slate-700">Gedetailleerde omschrijving *</label>
             <textarea 
               rows={6}
               required
+              placeholder="Leg hier de stappen en regels van de oefening uit..."
               className="w-full border border-slate-200 bg-white text-slate-900 rounded-xl px-4 py-3 outline-none"
               value={formData.description}
               onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
             />
           </div>
 
+          {/* Tags Sectie */}
+          <div className="space-y-4">
+            <label className="text-sm font-bold text-slate-700">Tags (zoekwoorden)</label>
+            <div className="flex gap-2">
+              <div className="relative flex-grow">
+                <Tag className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                <input 
+                  type="text" 
+                  placeholder="Bijv. drukzetten, omschakelen..."
+                  className="w-full pl-12 pr-4 py-3 border border-slate-200 bg-white text-slate-900 rounded-xl outline-none focus:ring-2 focus:ring-brand-green"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={handleTagKeyDown}
+                />
+              </div>
+              <button 
+                type="button"
+                onClick={addTag}
+                className="bg-slate-100 text-slate-600 px-6 py-3 rounded-xl font-bold hover:bg-slate-200 transition-colors flex items-center gap-2"
+              >
+                <Plus size={20} />
+              </button>
+            </div>
+            
+            {/* Tag Badges */}
+            {formData.tags && formData.tags.length > 0 && (
+              <div className="flex flex-wrap gap-2 pt-2">
+                {formData.tags.map(tag => (
+                  <span 
+                    key={tag} 
+                    className="bg-emerald-50 text-brand-green border border-emerald-100 px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wider flex items-center gap-2 animate-in zoom-in duration-200"
+                  >
+                    #{tag}
+                    <button 
+                      type="button" 
+                      onClick={() => removeTag(tag)}
+                      className="hover:text-red-500 transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="space-y-2">
-            <label className="text-sm font-bold text-slate-700">Veldopstelling</label>
-            <div className="flex flex-col md:flex-row items-center gap-6 p-6 bg-slate-50 rounded-2xl border-2 border-dashed">
-              <label className="cursor-pointer flex flex-col items-center">
-                {uploading ? <Loader2 className="animate-spin" size={40} /> : <Upload size={40} />}
-                <span className="text-sm font-bold">Upload tekening</span>
+            <label className="text-sm font-bold text-slate-700">Veldopstelling (Afbeelding)</label>
+            <div className="flex flex-col md:flex-row items-center gap-6 p-6 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+              <label className="cursor-pointer flex flex-col items-center group">
+                {uploading ? (
+                  <Loader2 className="animate-spin text-brand-green" size={40} />
+                ) : (
+                  <Upload className="text-slate-400 group-hover:text-brand-green transition-colors" size={40} />
+                )}
+                <span className="text-sm font-bold mt-2">Upload tekening</span>
                 <input type="file" className="hidden" accept="image/*" onChange={handleFileChange} />
               </label>
-              {formData.image && <img src={formData.image} className="w-32 h-24 object-contain" alt="Preview" />}
+              {formData.image && (
+                <div className="relative group">
+                   <img src={formData.image} className="w-48 h-32 object-contain rounded-xl border bg-white" alt="Preview" />
+                   <button 
+                    type="button"
+                    onClick={() => setFormData(prev => ({ ...prev, image: '' }))}
+                    className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-lg"
+                   >
+                     <X size={14} />
+                   </button>
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="flex gap-4 pt-6">
-            <button type="submit" disabled={uploading} className="flex-grow bg-brand-green text-white py-4 rounded-xl font-bold text-lg shadow-lg">
-              <Save size={22} className="inline mr-2" /> Opslaan
+          <div className="flex gap-4 pt-6 border-t border-slate-100">
+            <button 
+              type="submit" 
+              disabled={uploading || loading} 
+              className="flex-grow bg-brand-green text-white py-4 rounded-xl font-bold text-lg shadow-lg hover:bg-emerald-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Save size={22} /> Oefening Opslaan
             </button>
-            <button type="button" onClick={onCancel} className="px-8 bg-slate-100 text-slate-600 py-4 rounded-xl font-bold text-lg">Annuleren</button>
+            <button 
+              type="button" 
+              onClick={onCancel} 
+              className="px-8 bg-slate-100 text-slate-600 py-4 rounded-xl font-bold text-lg hover:bg-slate-200 transition-colors"
+            >
+              Annuleren
+            </button>
           </div>
         </form>
       </div>
