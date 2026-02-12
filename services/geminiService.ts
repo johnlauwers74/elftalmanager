@@ -9,7 +9,7 @@ export const generateExerciseSuggestions = async (topic: string) => {
       model: "gemini-3-flash-preview",
       contents: `Genereer een professionele voetbaltraining oefening voor het thema: "${topic}". 
       Geef de output in het Nederlands in JSON formaat met de volgende velden: 
-      title, type, ageGroup, playersCount, shortDescription, description, tags (array van strings).`,
+      title, type, agegroup, playerscount, shortdescription, description, tags (array van strings).`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -17,16 +17,16 @@ export const generateExerciseSuggestions = async (topic: string) => {
           properties: {
             title: { type: Type.STRING },
             type: { type: Type.STRING },
-            ageGroup: { type: Type.STRING },
-            playersCount: { type: Type.STRING },
-            shortDescription: { type: Type.STRING },
+            agegroup: { type: Type.STRING },
+            playerscount: { type: Type.STRING },
+            shortdescription: { type: Type.STRING },
             description: { type: Type.STRING },
             tags: { 
               type: Type.ARRAY,
               items: { type: Type.STRING }
             }
           },
-          required: ["title", "type", "ageGroup", "playersCount", "shortDescription", "description", "tags"]
+          required: ["title", "type", "agegroup", "playerscount", "shortdescription", "description", "tags"]
         }
       }
     });
