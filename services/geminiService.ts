@@ -9,7 +9,7 @@ export const generateExerciseSuggestions = async (topic: string) => {
       model: "gemini-3-flash-preview",
       contents: `Genereer een professionele voetbaltraining oefening voor het thema: "${topic}". 
       Geef de output in het Nederlands in JSON formaat met de volgende velden: 
-      title, type, agegroup, playerscount, shortdescription, description, tags (array van strings).`,
+      title, type, agegroup, playerscount, shortdescription, detailedinstructions, tags (array van strings).`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
@@ -20,18 +20,19 @@ export const generateExerciseSuggestions = async (topic: string) => {
             agegroup: { type: Type.STRING },
             playerscount: { type: Type.STRING },
             shortdescription: { type: Type.STRING },
-            description: { type: Type.STRING },
+            detailedinstructions: { type: Type.STRING },
             tags: { 
               type: Type.ARRAY,
               items: { type: Type.STRING }
             }
           },
-          required: ["title", "type", "agegroup", "playerscount", "shortdescription", "description", "tags"]
+          propertyOrdering: ["title", "type", "agegroup", "playerscount", "shortdescription", "detailedinstructions", "tags"]
         }
       }
     });
     
-    return JSON.parse(response.text || '{}');
+    const jsonStr = response.text?.trim() || '{}';
+    return JSON.parse(jsonStr);
   } catch (error) {
     console.error("Gemini Error:", error);
     return null;
