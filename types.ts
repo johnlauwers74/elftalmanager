@@ -26,13 +26,13 @@ export interface Exercise {
   id: string;
   title: string;
   type: string;
-  ageGroup: string;
-  playersCount: string;
-  shortDescription: string;
+  agegroup: string;
+  playerscount: string;
+  shortdescription: string;
   description: string;
   image?: string;
   tags: string[];
-  created_at: string;
+  createdat: string;
 }
 
 export interface Podcast {
