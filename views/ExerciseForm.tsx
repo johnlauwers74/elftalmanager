@@ -28,7 +28,7 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
     agegroup: 'U12',
     playerscount: '10',
     shortdescription: '',
-    description: '',
+    detailedinstructions: '',
     tags: [],
     image: ''
   });
@@ -96,7 +96,7 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.title || !formData.shortdescription || !formData.description) {
+    if (!formData.title || !formData.shortdescription || !formData.detailedinstructions) {
       alert('Vul alle verplichte velden in.');
       return;
     }
@@ -111,9 +111,9 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-10">
+    <div className="max-w-4xl mx-auto px-4 py-10 text-slate-900">
       <div className="bg-white rounded-3xl shadow-xl p-8 md:p-12 border border-slate-100">
-        <div className="flex justify-between items-center mb-8 text-slate-900">
+        <div className="flex justify-between items-center mb-8">
           <h2 className="text-3xl font-bold">
             {initialData ? 'Oefening Bewerken' : 'Nieuwe Oefening'}
           </h2>
@@ -124,7 +124,7 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
           <div className="grid md:grid-cols-2 gap-6">
             <div className="space-y-2">
               <label className="text-sm font-bold text-slate-700">Titel / Thema *</label>
-              <div className="flex gap-2 text-slate-900">
+              <div className="flex gap-2">
                 <input 
                   type="text" 
                   required
@@ -151,7 +151,7 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
             <div className="space-y-2">
               <label className="text-sm font-bold text-slate-700">Type Oefening</label>
               <select 
-                className="w-full border border-slate-200 bg-white text-slate-900 rounded-xl px-4 py-3 outline-none"
+                className="w-full border border-slate-200 bg-white rounded-xl px-4 py-3 outline-none"
                 value={formData.type}
                 onChange={(e) => setFormData(prev => ({ ...prev, type: e.target.value }))}
               >
@@ -162,7 +162,7 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
             <div className="space-y-2">
               <label className="text-sm font-bold text-slate-700">Leeftijdscategorie</label>
               <select 
-                className="w-full border border-slate-200 bg-white text-slate-900 rounded-xl px-4 py-3 outline-none"
+                className="w-full border border-slate-200 bg-white rounded-xl px-4 py-3 outline-none"
                 value={formData.agegroup}
                 onChange={(e) => setFormData(prev => ({ ...prev, agegroup: e.target.value }))}
               >
@@ -174,7 +174,7 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
               <label className="text-sm font-bold text-slate-700">Aantal Spelers</label>
               <input 
                 type="text" 
-                className="w-full border border-slate-200 bg-white text-slate-900 rounded-xl px-4 py-3 outline-none"
+                className="w-full border border-slate-200 bg-white rounded-xl px-4 py-3 outline-none"
                 value={formData.playerscount}
                 onChange={(e) => setFormData(prev => ({ ...prev, playerscount: e.target.value }))}
               />
@@ -187,7 +187,7 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
               type="text" 
               required
               placeholder="Wat is het hoofddoel van deze oefening?"
-              className="w-full border border-slate-200 bg-white text-slate-900 rounded-xl px-4 py-3 outline-none"
+              className="w-full border border-slate-200 bg-white rounded-xl px-4 py-3 outline-none"
               value={formData.shortdescription}
               onChange={(e) => setFormData(prev => ({ ...prev, shortdescription: e.target.value }))}
             />
@@ -199,9 +199,9 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
               rows={6}
               required
               placeholder="Leg hier de stappen en regels van de oefening uit..."
-              className="w-full border border-slate-200 bg-white text-slate-900 rounded-xl px-4 py-3 outline-none"
-              value={formData.description}
-              onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+              className="w-full border border-slate-200 bg-white rounded-xl px-4 py-3 outline-none"
+              value={formData.detailedinstructions}
+              onChange={(e) => setFormData(prev => ({ ...prev, detailedinstructions: e.target.value }))}
             />
           </div>
 
@@ -214,7 +214,7 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
                 <input 
                   type="text" 
                   placeholder="Bijv. drukzetten, omschakelen..."
-                  className="w-full pl-12 pr-4 py-3 border border-slate-200 bg-white text-slate-900 rounded-xl outline-none focus:ring-2 focus:ring-brand-green"
+                  className="w-full pl-12 pr-4 py-3 border border-slate-200 bg-white rounded-xl outline-none focus:ring-2 focus:ring-brand-green"
                   value={tagInput}
                   onChange={(e) => setTagInput(e.target.value)}
                   onKeyDown={handleTagKeyDown}
