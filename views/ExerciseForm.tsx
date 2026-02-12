@@ -25,9 +25,9 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
   const [formData, setFormData] = useState<Partial<Exercise>>({
     title: '',
     type: 'Technisch',
-    ageGroup: 'U12',
-    playersCount: '10',
-    shortDescription: '',
+    agegroup: 'U12',
+    playerscount: '10',
+    shortdescription: '',
     description: '',
     tags: [],
     image: ''
@@ -96,7 +96,7 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.title || !formData.shortDescription || !formData.description) {
+    if (!formData.title || !formData.shortdescription || !formData.description) {
       alert('Vul alle verplichte velden in.');
       return;
     }
@@ -163,8 +163,8 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
               <label className="text-sm font-bold text-slate-700">Leeftijdscategorie</label>
               <select 
                 className="w-full border border-slate-200 bg-white text-slate-900 rounded-xl px-4 py-3 outline-none"
-                value={formData.ageGroup}
-                onChange={(e) => setFormData(prev => ({ ...prev, ageGroup: e.target.value }))}
+                value={formData.agegroup}
+                onChange={(e) => setFormData(prev => ({ ...prev, agegroup: e.target.value }))}
               >
                 {AGE_GROUPS.map(g => <option key={g} value={g}>{g}</option>)}
               </select>
@@ -175,8 +175,8 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
               <input 
                 type="text" 
                 className="w-full border border-slate-200 bg-white text-slate-900 rounded-xl px-4 py-3 outline-none"
-                value={formData.playersCount}
-                onChange={(e) => setFormData(prev => ({ ...prev, playersCount: e.target.value }))}
+                value={formData.playerscount}
+                onChange={(e) => setFormData(prev => ({ ...prev, playerscount: e.target.value }))}
               />
             </div>
           </div>
@@ -188,8 +188,8 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
               required
               placeholder="Wat is het hoofddoel van deze oefening?"
               className="w-full border border-slate-200 bg-white text-slate-900 rounded-xl px-4 py-3 outline-none"
-              value={formData.shortDescription}
-              onChange={(e) => setFormData(prev => ({ ...prev, shortDescription: e.target.value }))}
+              value={formData.shortdescription}
+              onChange={(e) => setFormData(prev => ({ ...prev, shortdescription: e.target.value }))}
             />
           </div>
 
