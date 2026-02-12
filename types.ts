@@ -18,7 +18,7 @@ export interface Article {
   content: string;
   author: string;
   date: string;
-  imageUrl: string;
+  image_url: string;
   tags: string[];
 }
 
@@ -29,7 +29,7 @@ export interface Exercise {
   agegroup: string;
   playerscount: string;
   shortdescription: string;
-  description: string;
+  detailedinstructions: string;
   image?: string;
   tags: string[];
   created_at: string;
@@ -39,7 +39,7 @@ export interface Podcast {
   id: string;
   title: string;
   description: string;
-  audioUrl: string;
+  audio_url: string;
   duration: string;
   date: string;
 }
