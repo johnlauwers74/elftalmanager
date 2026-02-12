@@ -32,7 +32,7 @@ export interface Exercise {
   description: string;
   image?: string;
   tags: string[];
-  createdat: string;
+  created_at: string;
 }
 
 export interface Podcast {
