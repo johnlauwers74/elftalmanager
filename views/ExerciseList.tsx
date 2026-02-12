@@ -89,11 +89,11 @@ const ExerciseList: React.FC<ExerciseListProps> = ({ exercises, onAdd, onEdit, i
             </div>
             <div>
               <span className="text-slate-400 text-[10px] block uppercase font-black tracking-widest mb-1">Leeftijd</span>
-              <span className="font-bold">{selectedExercise.ageGroup}</span>
+              <span className="font-bold">{selectedExercise.agegroup}</span>
             </div>
             <div>
               <span className="text-slate-400 text-[10px] block uppercase font-black tracking-widest mb-1">Spelers</span>
-              <span className="font-bold">{selectedExercise.playersCount}</span>
+              <span className="font-bold">{selectedExercise.playerscount}</span>
             </div>
             <div>
               <span className="text-slate-400 text-[10px] block uppercase font-black tracking-widest mb-1">Datum</span>
@@ -103,7 +103,7 @@ const ExerciseList: React.FC<ExerciseListProps> = ({ exercises, onAdd, onEdit, i
           
           <div className="mb-10 text-left">
             <h2 className="text-xl font-black mb-4 text-brand-dark uppercase tracking-tight border-l-4 border-brand-green pl-4">Focus</h2>
-            <p className="text-slate-700 leading-relaxed text-lg">{selectedExercise.shortDescription}</p>
+            <p className="text-slate-700 leading-relaxed text-lg">{selectedExercise.shortdescription}</p>
           </div>
 
           <div className="mb-10 text-left">
@@ -182,11 +182,11 @@ const ExerciseList: React.FC<ExerciseListProps> = ({ exercises, onAdd, onEdit, i
             </div>
             <div className="p-8 flex-grow flex flex-col">
               <div className="flex justify-between items-center mb-4">
-                <span className="text-brand-green font-black text-xs uppercase tracking-widest">{ex.ageGroup}</span>
-                <span className="text-slate-400 text-xs font-bold">{ex.playersCount} Spelers</span>
+                <span className="text-brand-green font-black text-xs uppercase tracking-widest">{ex.agegroup}</span>
+                <span className="text-slate-400 text-xs font-bold">{ex.playerscount} Spelers</span>
               </div>
               <h3 className="text-2xl font-black mb-3 text-brand-dark uppercase tracking-tight">{ex.title}</h3>
-              <p className="text-slate-500 text-sm line-clamp-2 mb-6">{ex.shortDescription}</p>
+              <p className="text-slate-500 text-sm line-clamp-2 mb-6">{ex.shortdescription}</p>
             </div>
           </div>
         ))}
