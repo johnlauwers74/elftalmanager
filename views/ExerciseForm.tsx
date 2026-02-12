@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Exercise } from '../types';
-import { Save, X, Sparkles, Loader2, Upload, Plus, Tag } from 'lucide-react';
+import { Save, X, Sparkles, Loader2, Upload, Plus, Tag, AlertTriangle, ExternalLink, Info } from 'lucide-react';
 import { generateExerciseSuggestions } from '../services/geminiService';
 import { uploadFile } from '../services/storageService';
 
@@ -22,6 +22,7 @@ const EXERCISE_TYPES = ['Technisch', 'Tactisch', 'Fysiek', 'Mentaal', 'Keepers',
 const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialData }) => {
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [storageError, setStorageError] = useState<string | null>(null);
   const [formData, setFormData] = useState<Partial<Exercise>>({
     title: '',
     type: 'Technisch',
@@ -44,10 +45,19 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
     const file = e.target.files?.[0];
     if (file) {
       setUploading(true);
+      setStorageError(null);
       try {
         const url = await uploadFile('oefeningen', file);
         if (url) {
           setFormData(prev => ({ ...prev, image: url }));
+        }
+      } catch (err: any) {
+        if (err.message.includes('STORAGE_RLS_ERROR')) {
+          setStorageError('Supabase Permission Error: Je moet de "Storage Policies" configureren in je Supabase Dashboard om afbeeldingen te kunnen uploaden.');
+        } else if (err.message.includes('STORAGE_BUCKET_NOT_FOUND')) {
+          setStorageError('Bucket niet gevonden: Maak een bucket genaamd "oefeningen" aan in Supabase Storage.');
+        } else {
+          setStorageError('Er is iets misgegaan bij het uploaden van de afbeelding.');
         }
       } finally {
         setUploading(false);
@@ -119,6 +129,36 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
           </h2>
           <button onClick={onCancel} className="text-slate-400 hover:text-slate-600 transition-colors"><X size={24} /></button>
         </div>
+
+        {storageError && (
+          <div className="mb-8 p-6 bg-red-50 border border-red-100 rounded-2xl flex flex-col gap-4 animate-in slide-in-from-top-4 duration-300">
+            <div className="flex items-start gap-4">
+              <div className="bg-red-500 text-white p-2 rounded-lg">
+                <AlertTriangle size={24} />
+              </div>
+              <div>
+                <h3 className="font-bold text-red-900">Configuratie vereist</h3>
+                <p className="text-sm text-red-700 leading-relaxed mt-1">{storageError}</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 pt-2 border-t border-red-200">
+              <a 
+                href="https://supabase.com/dashboard/project/_/storage/buckets/oefeningen" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition-all"
+              >
+                Ga naar Supabase Dashboard <ExternalLink size={14} />
+              </a>
+              <button 
+                onClick={() => alert(`Plak dit in de SQL editor van Supabase:\n\n-- Toestaan dat iedereen kan uploaden naar de buckets\ncreate policy "Upload Toestaan" on storage.objects for insert with check ( bucket_id in ('oefeningen', 'artikelen', 'podcasts') );\n\n-- Toestaan dat iedereen de bestanden kan zien\ncreate policy "Bekijken Toestaan" on storage.objects for select using ( bucket_id in ('oefeningen', 'artikelen', 'podcasts') );`)}
+                className="bg-white border border-red-200 text-red-600 px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-50 transition-all"
+              >
+                Toon SQL Oplossing
+              </button>
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid md:grid-cols-2 gap-6">
@@ -205,7 +245,6 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
             />
           </div>
 
-          {/* Tags Sectie */}
           <div className="space-y-4">
             <label className="text-sm font-bold text-slate-700">Tags (zoekwoorden)</label>
             <div className="flex gap-2">
@@ -229,7 +268,6 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
               </button>
             </div>
             
-            {/* Tag Badges */}
             {formData.tags && formData.tags.length > 0 && (
               <div className="flex flex-wrap gap-2 pt-2">
                 {formData.tags.map(tag => (
@@ -253,12 +291,12 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
 
           <div className="space-y-2">
             <label className="text-sm font-bold text-slate-700">Veldopstelling (Afbeelding)</label>
-            <div className="flex flex-col md:flex-row items-center gap-6 p-6 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200">
+            <div className={`flex flex-col md:flex-row items-center gap-6 p-6 bg-slate-50 rounded-2xl border-2 border-dashed transition-all ${storageError ? 'border-red-200' : 'border-slate-200'}`}>
               <label className="cursor-pointer flex flex-col items-center group">
                 {uploading ? (
                   <Loader2 className="animate-spin text-brand-green" size={40} />
                 ) : (
-                  <Upload className="text-slate-400 group-hover:text-brand-green transition-colors" size={40} />
+                  <Upload className={`transition-colors ${storageError ? 'text-red-300' : 'text-slate-400 group-hover:text-brand-green'}`} size={40} />
                 )}
                 <span className="text-sm font-bold mt-2">Upload tekening</span>
                 <input type="file" className="hidden" accept="image/*" onChange={handleFileChange} />
@@ -273,6 +311,11 @@ const ExerciseForm: React.FC<ExerciseFormProps> = ({ onSave, onCancel, initialDa
                    >
                      <X size={14} />
                    </button>
+                </div>
+              )}
+              {!formData.image && !uploading && (
+                <div className="text-xs text-slate-400 italic flex items-center gap-2">
+                   <Info size={14} /> Optioneel: voeg een veldtekening toe
                 </div>
               )}
             </div>
