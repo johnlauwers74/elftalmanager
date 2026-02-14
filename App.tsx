@@ -56,20 +56,12 @@ const App: React.FC = () => {
   // Functie om de volledige gebruikersinfo op te halen
   const fetchUserWithRole = async (supabaseUser: any): Promise<User> => {
     try {
-      // Zet een timeout op de profile fetch om hangen te voorkomen
-      const profilePromise = supabase
+      const { data: profile } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', supabaseUser.id)
         .single();
       
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout')), 2500)
-      );
-
-      const result: any = await Promise.race([profilePromise, timeoutPromise]);
-      const profile = result.data;
-
       if (!profile) throw new Error('Geen profiel');
 
       return {
@@ -80,12 +72,11 @@ const App: React.FC = () => {
         status: profile.status || 'ACTIVE'
       };
     } catch (err) {
-      console.log("Valt terug op standaard profiel wegens:", err);
       return {
         id: supabaseUser.id,
         email: supabaseUser.email || '',
-        name: supabaseUser.user_metadata?.full_name || supabaseUser.email?.split('@')[0] || 'Coach',
-        role: 'COACH', // Veiligheidshalve coach rol als DB check faalt
+        name: supabaseUser.user_metadata?.full_name || 'Coach',
+        role: 'COACH',
         status: 'ACTIVE'
       };
     }
@@ -103,11 +94,6 @@ const App: React.FC = () => {
   useEffect(() => {
     if (initialized.current) return;
     initialized.current = true;
-
-    // Harde failsafe: na 4 seconden MOET de loader weg
-    const failsafe = setTimeout(() => {
-      setAuthLoading(false);
-    }, 4000);
 
     const initAuth = async () => {
       try {
@@ -136,25 +122,40 @@ const App: React.FC = () => {
       }
     });
 
-    return () => {
-      subscription.unsubscribe();
-      clearTimeout(failsafe);
-    };
+    return () => subscription.unsubscribe();
   }, [enterDashboard]);
 
   const handleLoginAttempt = async (email: string, pass: string) => {
-    setAuthLoading(true); // Toon loader tijdens inloggen
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
       if (error) throw error;
-      
-      if (data.session?.user) {
-        const fullUser = await fetchUserWithRole(data.session.user);
-        enterDashboard(fullUser);
-      }
     } catch (err: any) { 
-      setAuthLoading(false);
       alert(`Inloggen mislukt: ${err.message}`);
+      throw err;
+    }
+  };
+
+  const handleSubscribe = async (email: string, name: string) => {
+    try {
+      // We voegen de aanvraag toe aan de profiles tabel
+      const { error } = await supabase.from('profiles').insert([
+        { 
+          email: email, 
+          name: name, 
+          role: 'COACH', 
+          status: 'PENDING' 
+        }
+      ]);
+
+      if (error) {
+        if (error.code === '23505') throw new Error('Dit e-mailadres heeft al een aanvraag ingediend.');
+        throw error;
+      }
+      
+      // Ververs de admin lijst zodat de nieuwe aanvraag direct zichtbaar is voor admins
+      refreshAppData();
+    } catch (err: any) {
+      console.error("Registratie fout:", err);
       throw err;
     }
   };
@@ -177,12 +178,9 @@ const App: React.FC = () => {
 
   const handleRegisterClick = () => {
     setIsLoginModalOpen(false);
-    // Wacht even tot de modal gesloten is voor een vloeiende scroll
     setTimeout(() => {
       const element = document.getElementById('subscribe');
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth' });
-      }
+      if (element) element.scrollIntoView({ behavior: 'smooth' });
     }, 100);
   };
 
@@ -191,13 +189,7 @@ const App: React.FC = () => {
       <div className="min-h-screen bg-brand-dark flex flex-col items-center justify-center text-white p-6 text-center">
         <Loader2 className="animate-spin text-brand-green mb-6" size={60} />
         <h2 className="text-xl font-black uppercase tracking-widest mb-2">Elftalmanager</h2>
-        <p className="text-slate-400 font-medium">Bezig met initialiseren van je dashboard...</p>
-        <button 
-          onClick={() => setAuthLoading(false)} 
-          className="mt-12 text-xs text-slate-500 underline hover:text-white transition-colors"
-        >
-          Laden duurt te lang? Klik hier om door te gaan.
-        </button>
+        <p className="text-slate-400 font-medium">Bezig met laden...</p>
       </div>
     );
   }
@@ -209,7 +201,7 @@ const App: React.FC = () => {
     }} email={activationEmail} onCancel={() => setView('LANDING')} />;
     
     if (!currentUser || view === 'LANDING') {
-      return <LandingPage onLogin={() => setIsLoginModalOpen(true)} onSubscribe={() => {}} />;
+      return <LandingPage onLogin={() => setIsLoginModalOpen(true)} onSubscribe={handleSubscribe} />;
     }
 
     switch (view) {
