@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { User, Exercise, Article, Podcast, ViewState, Role } from './types';
+import { User, Exercise, Article, Podcast, ViewState, Role, UserStatus } from './types';
 import Navbar from './components/Navbar';
 import LandingPage from './components/LandingPage';
 import ExerciseList from './views/ExerciseList';
@@ -42,7 +42,7 @@ const App: React.FC = () => {
       const [exRes, artRes, profRes] = await Promise.all([
         supabase.from('exercises').select('*').order('created_at', { ascending: false }),
         supabase.from('articles').select('*').order('date', { ascending: false }),
-        supabase.from('profiles').select('*')
+        supabase.from('profiles').select('*').order('name', { ascending: true })
       ]);
       
       if (exRes.data) setExercises(exRes.data);
@@ -137,7 +137,6 @@ const App: React.FC = () => {
 
   const handleSubscribe = async (email: string, name: string) => {
     try {
-      // We voegen de aanvraag toe aan de profiles tabel
       const { error } = await supabase.from('profiles').insert([
         { 
           email: email, 
@@ -151,12 +150,54 @@ const App: React.FC = () => {
         if (error.code === '23505') throw new Error('Dit e-mailadres heeft al een aanvraag ingediend.');
         throw error;
       }
-      
-      // Ververs de admin lijst zodat de nieuwe aanvraag direct zichtbaar is voor admins
       refreshAppData();
     } catch (err: any) {
-      console.error("Registratie fout:", err);
       throw err;
+    }
+  };
+
+  // ADMIN USER MANAGEMENT HANDLERS
+  const handleApproveUser = async (idOrEmail: string) => {
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ status: 'APPROVED' })
+        .or(`id.eq.${idOrEmail},email.eq.${idOrEmail}`);
+      
+      if (error) throw error;
+      alert('Coach goedgekeurd! De status is nu "Wacht op wachtwoord".');
+      refreshAppData();
+    } catch (err: any) {
+      alert(`Fout bij goedkeuren: ${err.message}`);
+    }
+  };
+
+  const handleUpdateUserRole = async (idOrEmail: string, newRole: Role) => {
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ role: newRole })
+        .or(`id.eq.${idOrEmail},email.eq.${idOrEmail}`);
+      
+      if (error) throw error;
+      refreshAppData();
+    } catch (err: any) {
+      alert(`Fout bij rol wijzigen: ${err.message}`);
+    }
+  };
+
+  const handleToggleUserStatus = async (idOrEmail: string, currentStatus: UserStatus) => {
+    try {
+      const nextStatus = currentStatus === 'INACTIVE' ? 'ACTIVE' : 'INACTIVE';
+      const { error } = await supabase
+        .from('profiles')
+        .update({ status: nextStatus })
+        .or(`id.eq.${idOrEmail},email.eq.${idOrEmail}`);
+      
+      if (error) throw error;
+      refreshAppData();
+    } catch (err: any) {
+      alert(`Fout bij status wijzigen: ${err.message}`);
     }
   };
 
@@ -216,7 +257,7 @@ const App: React.FC = () => {
         refreshAppData();
         setView('BLOG');
       }} onCancel={() => setView('BLOG')} />;
-      case 'ADMIN_USERS': return <AdminUserView users={allUsers} onApprove={() => {}} onUpdateRole={() => {}} onToggleStatus={() => {}} currentAdminId={currentUser.id} />;
+      case 'ADMIN_USERS': return <AdminUserView users={allUsers} onApprove={handleApproveUser} onUpdateRole={handleUpdateUserRole} onToggleStatus={handleToggleUserStatus} currentAdminId={currentUser.id} />;
       case 'PODCASTS': return <PodcastView podcasts={podcasts} isAdmin={currentUser.role === 'ADMIN'} onAddPodcast={() => {}} />;
       default: return <Dashboard exercisesCount={exercises.length} articlesCount={articles.length} coachName={currentUser.name} />;
     }
