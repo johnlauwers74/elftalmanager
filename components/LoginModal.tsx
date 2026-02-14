@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { X, Mail, Lock, Play, Loader2, ArrowRight, ShieldCheck, User as UserIcon } from 'lucide-react';
+import { X, Mail, Lock, Play, Loader2, ArrowRight, ShieldCheck, User as UserIcon, UserPlus } from 'lucide-react';
 import { Role } from '../types';
 
 interface LoginModalProps {
@@ -8,9 +8,10 @@ interface LoginModalProps {
   onLogin: (email: string, pass: string) => Promise<void>;
   onActivate: (email: string) => void;
   onDemoLogin: (role: Role) => void;
+  onRegisterClick: () => void;
 }
 
-const LoginModal: React.FC<LoginModalProps> = ({ onClose, onLogin, onActivate, onDemoLogin }) => {
+const LoginModal: React.FC<LoginModalProps> = ({ onClose, onLogin, onActivate, onDemoLogin, onRegisterClick }) => {
   const [email, setEmail] = useState('');
   const [pass, setPass] = useState('');
   const [loading, setLoading] = useState(false);
@@ -35,7 +36,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ onClose, onLogin, onActivate, o
           <button 
             onClick={onClose} 
             disabled={loading}
-            className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors"
+            className="absolute top-4 right-4 text-slate-400 hover:text-white transition-colors disabled:opacity-0"
           >
             <X size={24} />
           </button>
@@ -75,7 +76,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ onClose, onLogin, onActivate, o
                 placeholder="E-mail" 
                 required
                 disabled={loading}
-                className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-green bg-slate-50"
+                className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-green bg-slate-50 text-slate-900"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />
@@ -88,7 +89,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ onClose, onLogin, onActivate, o
                 placeholder="Wachtwoord" 
                 required
                 disabled={loading}
-                className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-green bg-slate-50"
+                className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-brand-green bg-slate-50 text-slate-900"
                 value={pass}
                 onChange={(e) => setPass(e.target.value)}
               />
@@ -102,6 +103,19 @@ const LoginModal: React.FC<LoginModalProps> = ({ onClose, onLogin, onActivate, o
               {loading ? <Loader2 className="animate-spin" size={20} /> : 'Inloggen'}
             </button>
           </form>
+
+          {/* Registratie Sectie */}
+          <div className="pt-6 border-t border-slate-100 text-center">
+            <p className="text-slate-500 text-sm mb-4">Nog geen account bij ons?</p>
+            <button 
+              onClick={onRegisterClick}
+              disabled={loading}
+              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition-all flex items-center justify-center gap-2 group"
+            >
+              <UserPlus size={18} className="text-brand-green group-hover:scale-110 transition-transform" />
+              Registreer hier als coach
+            </button>
+          </div>
         </div>
       </div>
     </div>
