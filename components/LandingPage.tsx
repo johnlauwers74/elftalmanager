@@ -1,22 +1,32 @@
 
 import React from 'react';
-import { CheckCircle, Shield, Zap, Mail, ChevronRight, BookOpen, Users } from 'lucide-react';
+import { CheckCircle, Shield, Zap, Mail, ChevronRight, BookOpen, Users, Loader2, AlertCircle } from 'lucide-react';
 import Logo from './Logo';
 
 interface LandingPageProps {
   onLogin: () => void;
-  onSubscribe: (email: string, name: string) => void;
+  onSubscribe: (email: string, name: string) => Promise<void>;
 }
 
 const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onSubscribe }) => {
   const [email, setEmail] = React.useState('');
   const [name, setName] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
   const [submitted, setSubmitted] = React.useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSubscribe(email, name);
-    setSubmitted(true);
+    setLoading(true);
+    setError(null);
+    try {
+      await onSubscribe(email, name);
+      setSubmitted(true);
+    } catch (err: any) {
+      setError(err.message || 'Er is iets misgegaan. Probeer het later opnieuw.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const scrollToSubscribe = () => {
@@ -96,7 +106,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onSubscribe }) => {
       <div id="subscribe" className="bg-brand-light py-32 transition-colors duration-300">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           {submitted ? (
-            <div className="bg-white p-16 rounded-3xl shadow-2xl border">
+            <div className="bg-white p-16 rounded-3xl shadow-2xl border animate-in zoom-in duration-300">
               <CheckCircle size={80} className="text-brand-green mx-auto mb-8 animate-bounce" />
               <h2 className="text-4xl font-black mb-6">Aanvraag Verzonden!</h2>
               <p className="text-slate-600 text-lg leading-relaxed">
@@ -108,25 +118,47 @@ const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onSubscribe }) => {
               <div className="absolute top-0 left-0 w-full h-2 bg-brand-green"></div>
               <h2 className="text-4xl font-black mb-4 text-brand-dark">Word Elftalmanager</h2>
               <p className="text-slate-500 mb-10 text-lg">Krijg direct toegang tot de volledige database en tools.</p>
+              
+              {error && (
+                <div className="max-w-md mx-auto mb-6 p-4 bg-red-50 text-red-700 rounded-xl flex items-center gap-3 animate-in fade-in slide-in-from-top-2">
+                  <AlertCircle size={20} className="shrink-0" />
+                  <p className="text-sm font-bold text-left">{error}</p>
+                </div>
+              )}
+
               <form onSubmit={handleSubmit} className="space-y-5 max-w-md mx-auto">
                 <input
                   type="text"
                   placeholder="Volledige Naam"
                   required
+                  disabled={loading}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full px-6 py-5 border border-slate-200 bg-white text-slate-900 rounded-2xl focus:ring-2 focus:ring-brand-green outline-none font-bold transition-all"
+                  className="w-full px-6 py-5 border border-slate-200 bg-white text-slate-900 rounded-2xl focus:ring-2 focus:ring-brand-green outline-none font-bold transition-all disabled:opacity-50"
                 />
                 <input
                   type="email"
                   placeholder="E-mail adres"
                   required
+                  disabled={loading}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-6 py-5 border border-slate-200 bg-white text-slate-900 rounded-2xl focus:ring-2 focus:ring-brand-green outline-none font-bold transition-all"
+                  className="w-full px-6 py-5 border border-slate-200 bg-white text-slate-900 rounded-2xl focus:ring-2 focus:ring-brand-green outline-none font-bold transition-all disabled:opacity-50"
                 />
-                <button type="submit" className="w-full bg-brand-dark hover:bg-brand-green text-white font-black py-5 rounded-2xl transition-all flex items-center justify-center gap-3 text-lg shadow-xl">
-                  Aanvraag Versturen <ChevronRight size={24} />
+                <button 
+                  type="submit" 
+                  disabled={loading}
+                  className="w-full bg-brand-dark hover:bg-brand-green text-white font-black py-5 rounded-2xl transition-all flex items-center justify-center gap-3 text-lg shadow-xl disabled:opacity-70 disabled:cursor-not-allowed group"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="animate-spin" size={24} /> Bezig met verzenden...
+                    </>
+                  ) : (
+                    <>
+                      Aanvraag Versturen <ChevronRight size={24} className="group-hover:translate-x-1 transition-transform" />
+                    </>
+                  )}
                 </button>
               </form>
             </div>
