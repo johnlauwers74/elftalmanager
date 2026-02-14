@@ -175,6 +175,17 @@ const App: React.FC = () => {
     }
   };
 
+  const handleRegisterClick = () => {
+    setIsLoginModalOpen(false);
+    // Wacht even tot de modal gesloten is voor een vloeiende scroll
+    setTimeout(() => {
+      const element = document.getElementById('subscribe');
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth' });
+      }
+    }, 100);
+  };
+
   if (authLoading) {
     return (
       <div className="min-h-screen bg-brand-dark flex flex-col items-center justify-center text-white p-6 text-center">
@@ -240,6 +251,7 @@ const App: React.FC = () => {
           onClose={() => setIsLoginModalOpen(false)} 
           onLogin={handleLoginAttempt} 
           onActivate={setActivationEmail} 
+          onRegisterClick={handleRegisterClick}
           onDemoLogin={(role) => {
             const mock: User = { id: 'demo', email: 'demo@pro.be', name: 'Demo Coach', role: role, status: 'ACTIVE' };
             enterDashboard(mock);
